@@ -11,35 +11,41 @@ struct rect {
     float h;
 };
 
-struct ColorRect {
-    rect rect;
-    float4 color;
-};
-
 struct ColorInOut {
     float4 position [[position]];
     float4 color;
 };
 
+struct PosOut {
+    float4 position [[position]];
+};
 
-vertex ColorInOut rectangle_vertex (
-    const device ColorRect *color_rect [[ buffer(0) ]],
+
+vertex PosOut rectangle_vertex (
+    const device rect *rect [[ buffer(0) ]],
     const device float2 *position [[ buffer(1) ]],
     unsigned int vid [[ vertex_id ]]
 ) {
-    ColorInOut out;
+    PosOut out;
     auto device const &pos = position[0];
     
     int vid_bit1 = vid % 2;
     int vid_bit2 = vid / 2;
-    float x = pos.x + (color_rect->rect.w / 2) * (2 * vid_bit1 - 1);
-    float y = pos.y - (color_rect->rect.h / 2) * (2 * vid_bit2 - 1);
+    float x = pos.x + (rect->w / 2) * (2 * vid_bit1 - 1);
+    float y = pos.y - (rect->h / 2) * (2 * vid_bit2 - 1);
 
     float4 out_pos = float4(x, y, 0, 1);
     out.position = out_pos;
-    out.color = color_rect->color;
 
     return out;
+}
+
+fragment float4 rectangle_shader (
+    PosOut in [[stage_in]],
+    const device float4 *color [[ buffer(0) ]]
+) {
+    auto device const &col = color[0];
+    return col;
 }
 
 vertex ColorInOut arrow_vertex (
