@@ -129,8 +129,8 @@ impl Collider for Arrow {
         //let cos_theta = f32::cos(positions[self.index][2]); //* self.width - f32::sin(positions[self.index][2] * self.height);
         //let sin_theta = f32::sin(positions[self.index][2]); //* self.width - f32::cos(positions[self.index][2] * self.height);
         Float4::new(
-            float2_add(apply_rotation_float2(Float2(0.0, self.height / 2.0), theta), pos), 
-            float2_add(apply_rotation_float2(Float2(0.0, -self.height / 2.0), theta), pos)
+            float2_add(apply_rotation_float2(Float2(0.0, self.height / 2.0), -theta), pos), 
+            float2_add(apply_rotation_float2(Float2(0.0, -self.height / 2.0), -theta), pos)
         )
     }
 }
@@ -138,6 +138,8 @@ impl Collider for Arrow {
 #[inline]
 fn build_arrow_vertices (width : f32, length : f32) -> [f32; 18]{
     [
+    // 0.0, -length / 2.0,
+    // 0.0, -length / 2.0,
     width / 6.0, -length / 2.0,
     -width / 6.0, -length / 2.0,
     width / 6.0, length / 4.0,
