@@ -79,7 +79,6 @@ struct Rect {
 
 pub trait Collider {
     fn get_collider(&self, positions : &Vec<Float3>) -> Float4;
-    //fn check_collision(&self, collider : impl Collider) -> bool;
 }
 
 #[derive(Clone, Copy)]
@@ -118,7 +117,7 @@ pub trait LineCollider {
 
 struct Arrow {
     index: usize,
-    width: f32,
+    _width: f32,
     height: f32,
 }
 
@@ -159,7 +158,7 @@ fn gen_random_arrows(arrows : &mut Vec<Arrow>, n : u16, view_width : f32, view_h
     let mut vertices : Vec<[f32; 18]> = Vec::new();
     let mut positions : Vec<[f32; 3]> = Vec::new();
     for i in 0..n {
-        arrows.push(Arrow {index: i as usize, width, height});
+        arrows.push(Arrow {index: i as usize, _width: width, height});
         vertices.push(build_arrow_vertices(width, height));
         positions.push([random::<f32>() * 4.0 - 5.0, random::<f32>() * 2.0 - 1.0, PI / 2.0]);
     };
@@ -167,37 +166,58 @@ fn gen_random_arrows(arrows : &mut Vec<Arrow>, n : u16, view_width : f32, view_h
     (vertices, positions)
 }
 
-fn gen_random_paths (paths : &mut Vec<Box<dyn Path>>, n : u16) {
-    for _ in 0..n {
-        let x = (random::<f32>() * 3.0).floor() as u8;
+fn gen_random_path (t : f32) -> Box<dyn Path>{
+    let x = (random::<f32>() * 3.0).floor() as u8;
         match x {
             0 => {
-                paths.push(Box::new(StraightPath {
-                    speed: random::<f32>() / 5.0 + 0.4,
+                Box::new(StraightPath {
+                    speed: random::<f32>() / 2.0 + 0.4,
                     rotation: (random::<f32>() * PI * 0.5) + PI * 0.75,
                     origin: Float2(0.0, 1.0),
-                }))
+                    start_t: t,
+                    lifetime: t + 3.0 + random::<f32>()
+                })
             },
             1 => {
-                paths.push(Box::new(WavyPath {
-                    speed: random::<f32>() / 5.0 + 0.4,
-                    amplitude: (random::<f32>() - 0.5) * 2.0,
+                Box::new(WavyPath {
+                    speed: random::<f32>() / 2.0 + 0.4,
+                    amplitude: (random::<f32>() - 0.5).signum() * (random::<f32>() / 2.0 + 0.2),
                     rotation: (random::<f32>() * PI * 0.5) + PI * 0.25,
-                    origin: Float2(0.0, 1.0)
-                }));
+                    origin: Float2(0.0, 1.0),
+                    start_t: t,
+                    lifetime: t + 3.0 + random::<f32>()
+                })
             },
             2 => {
-                paths.push(Box::new(CirclePath {
-                    speed: random::<f32>() / 5.0 + 1.0,
+                Box::new(CirclePath {
+                    speed: random::<f32>() / 3.0 + 1.0,
                     radius: random::<f32>() * 1.5 + 0.5,
-                    origin: Float2(0.0, 1.0)
-                }));
+                    start: random::<f32>() * PI,
+                    origin: Float2(0.0, 1.0),
+                    start_t: t,
+                    lifetime: t + 3.0 + random::<f32>()
+                })
             },
-            _ => paths.push(Box::new(StraightPath {
+            _ => Box::new(StraightPath {
                 speed: random::<f32>() / 20.0,
                 rotation: (random::<f32>() + 0.5f32) * PI,
                 origin: Float2(0.0, 1.0),
-            }))
+                start_t: t,
+                lifetime: t + 3.0 + random::<f32>()
+            })
+        }
+}
+fn gen_random_paths (paths : &mut Vec<Box<dyn Path>>, n : u16) {
+    for _ in 0..n {
+        paths.push(gen_random_path(0.0));
+    }
+}
+
+fn regen_dead_arrows (paths : &mut Vec<Box<dyn Path>>, t : f32) {
+    //println!("{}", paths[0].get_expiration() < t);
+    for path in paths.iter_mut() {
+        if path.get_expiration() < t {
+            *path = gen_random_path(t); 
         }
     }
 }
@@ -256,37 +276,56 @@ fn check_arrow_collisions(arrows : &mut Vec<Arrow>, hero : &Hero, positions: &Ve
 }
 
 pub trait Path {
-    fn get_position(&self, t : f32) -> Float2;
-    fn get_position_and_rotation(&self, t : f32) -> Float3;
+    fn get_position(&self, del_t : f32) -> Float2;
+    fn get_position_and_rotation(&self, del_t : f32) -> Float3;
+    fn get_relative_pos_rot(&self, t : f32) -> Float3;
+    fn get_expiration(&self) -> f32;
 }
 
 struct StraightPath {
     speed : f32,
     rotation : f32,
     origin : Float2,
+    start_t : f32,
+    lifetime : f32,
 }
 
 impl Path for StraightPath {
-    fn get_position(&self, t : f32) -> Float2 {
-        float2_add(apply_rotation_float2(Float2(0.0, t * self.speed), -self.rotation), self.origin)
+    fn get_position(&self, del_t : f32) -> Float2 {
+        float2_add(apply_rotation_float2(Float2(0.0, del_t * self.speed), -self.rotation), self.origin)
     }
-    fn get_position_and_rotation(&self, t : f32) -> Float3 {
-        Float3::new(self.get_position(t), self.rotation)
+    fn get_position_and_rotation(&self, del_t : f32) -> Float3 {
+        Float3::new(self.get_position(del_t), self.rotation)
+    }
+    fn get_relative_pos_rot(&self, t : f32) -> Float3 {
+        self.get_position_and_rotation((t - self.start_t).abs())
+    }
+    fn get_expiration(&self) -> f32 {
+        self.lifetime
     }
 }
 
 struct CirclePath {
     speed : f32,
     radius : f32,
+    start : f32,
     origin : Float2,
+    start_t : f32,
+    lifetime : f32,
 }
 
 impl Path for CirclePath {
-    fn get_position(&self, t : f32) -> Float2 {
-        float2_add(Float2((t*self.speed).cos() * self.radius, (t*self.speed).sin() * self.radius), self.origin)
+    fn get_position(&self, del_t : f32) -> Float2 {
+        float2_add(Float2((del_t * self.speed + self.start).cos() * self.radius, (del_t * self.speed + self.start).sin() * self.radius), self.origin)
     }
-    fn get_position_and_rotation(&self, t : f32) -> Float3 {
-        Float3::new(self.get_position(t), -(t * self.speed))
+    fn get_position_and_rotation(&self, del_t : f32) -> Float3 {
+        Float3::new(self.get_position(del_t), -(del_t * self.speed + self.start))
+    }
+    fn get_relative_pos_rot(&self, t : f32) -> Float3 {
+        self.get_position_and_rotation((t - self.start_t).abs())
+    }
+    fn get_expiration(&self) -> f32 {
+        self.lifetime
     }
 }
 
@@ -295,14 +334,22 @@ struct WavyPath {
     amplitude : f32,
     rotation : f32,
     origin : Float2,
+    start_t : f32,
+    lifetime : f32,
 }
 
 impl Path for WavyPath {
-    fn get_position(&self, t : f32) -> Float2 {
-        float2_add(apply_rotation_float2(Float2(t * self.speed, t.sin() * self.amplitude), -(self.amplitude / self.amplitude.abs()) * self.rotation), self.origin)
+    fn get_position(&self, del_t : f32) -> Float2 {
+    float2_add(apply_rotation_float2(Float2(del_t * self.speed, (2.0 * del_t).sin() * self.amplitude), -(self.amplitude / self.amplitude.abs()) * self.rotation), self.origin)
     }
-    fn get_position_and_rotation(&self, t : f32) -> Float3 {
-        Float3::new(self.get_position(t), self.rotation + (t.cos() / (t.cos() * t.cos() + 1.0).sqrt()).acos())
+    fn get_position_and_rotation(&self, del_t : f32) -> Float3 {
+        Float3::new(self.get_position(del_t), self.rotation + ((2.0 * del_t).cos() / ((2.0 * del_t).cos().powf(2.0)+ 1.0).sqrt()).acos())
+    }
+    fn get_relative_pos_rot(&self, t : f32) -> Float3 {
+        self.get_position_and_rotation((t - self.start_t).abs())
+    }
+    fn get_expiration(&self) -> f32 {
+        self.lifetime
     }
 }
 
@@ -378,7 +425,7 @@ fn set_window_layer(window : &Retained<NSWindow>, layer: &MetalLayer) {
 }
 
 #[inline]
-fn get_next_frame (fps : &f64) -> Retained<NSDate> {
+fn get_next_frame (fps : f64) -> Retained<NSDate> {
     unsafe {
         NSDate::dateWithTimeIntervalSinceNow(1.0 / fps)
     }
@@ -519,7 +566,7 @@ fn main() {
     // let arrow1_pos = [-150.0f32 / view_width, 100.0 / view_height, PI / 2.0];
     // let arrow2_pos = [-150.0f32 / view_width, 1.0 / view_height, PI / 2.0];
 
-    let num_arrows = 32;
+    let num_arrows = 64;
     let mut arrows = Vec::<Arrow>::new();
     arrows.reserve(num_arrows as usize);
 
@@ -549,16 +596,17 @@ fn main() {
 
     let fps = 60.0;
     let mut key_pressed : u16 = 112;
-    let mut frame_time = get_next_frame(&fps);
+    let mut frame_time = get_next_frame(fps);
+    let mut mouse_down = false;
+    let mut mouse_location = CGPoint { x: 0.0, y: 0.0};
 
     let mut t = 0.0;
 
     loop {
         autoreleasepool(|| {
                 if unsafe { frame_time.compare(&NSDate::now()) } == NSComparisonResult::Ascending {
-                    frame_time = get_next_frame(&fps);
-                    t += 0.01;
-
+                    frame_time = get_next_frame(fps);
+                    t += 1.0 / fps as f32;
                     match key_pressed {
                         0 => current_x -= 10.0,
                         1 => current_y -= 10.0,
@@ -581,7 +629,7 @@ fn main() {
                         0 as u64, 
                         (position_data.len() * size_of::<Float2>()) as u64
                     ));
-                    let apbuf : Vec<Float3> = arrow_paths.iter().map(|path| path.get_position_and_rotation(t)).collect();
+                    let apbuf : Vec<Float3> = arrow_paths.iter().map(|path| path.get_relative_pos_rot(t)).collect();
                     let ap = arrow_pbuf.contents();
                     unsafe {
                         std::ptr::copy(
@@ -624,8 +672,10 @@ fn main() {
                     command_buffer.present_drawable(&drawable);
                     command_buffer.commit();
 
+
+                    //end_of_frame
+                    regen_dead_arrows(&mut arrow_paths, t);
             }
-            //do_projectile_calcs();
 
             
             loop {
@@ -650,6 +700,17 @@ fn main() {
                                         key_pressed = 112;
                                     }
                                     app.sendEvent(&e);
+                                },
+                                NSEventType::LeftMouseDown => {
+                                    mouse_down = true;
+                                    mouse_location = e.locationInWindow();
+
+                                }
+                                NSEventType::LeftMouseDragged => {
+                                    mouse_location = e.locationInWindow();
+                                }
+                                NSEventType::LeftMouseUp => {
+                                    mouse_down = false;
                                 }
                                 _ => app.sendEvent(&e),
                             }
