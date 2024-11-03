@@ -1,10 +1,10 @@
 #include <metal_stdlib>
 using namespace metal;
 
-struct transform {
-    packed_float2 position;
-    float rotation;
-};
+// struct transform {
+//     packed_float2 position;
+//     float rotation;
+// };
 
 struct rect {
     float w;
@@ -50,7 +50,7 @@ fragment float4 rectangle_shader (
 
 vertex ColorInOut arrow_vertex (
     const device float2 *vertex_array [[ buffer(0) ]],
-    const device transform *transform [[ buffer(1) ]],
+    const device packed_float3 *transform [[ buffer(1) ]],
     unsigned int vid [[ vertex_id ]]
 ) {
     ColorInOut out;
@@ -58,9 +58,9 @@ vertex ColorInOut arrow_vertex (
     auto device const &v = vertex_array[vid];
     auto device const &tran = transform[vid / 9];
 
-    float theta = tran.rotation;
+    float theta = tran.z;
     float2x2 rot_matrix = float2x2(float2(cos(theta), sin(theta)), float2(-sin(theta), cos(theta)));
-    float2 rot_and_trans_pos = float2(v.x, v.y) * rot_matrix + float2(tran.position.x, tran.position.y);
+    float2 rot_and_trans_pos = float2(v.x, v.y) * rot_matrix + float2(tran.x, tran.y);
 
     out.position = float4(rot_and_trans_pos, 0.0, 1.0);
     out.color = float4(1.0, 0.0, 0.0, 1.0);
