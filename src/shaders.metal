@@ -93,20 +93,21 @@ fragment float4 pellet_shader (
 
 vertex ColorInOut arrow_vertex (
     const device float2 *vertex_array [[ buffer(0) ]],
-    const device packed_float3 *transform [[ buffer(1) ]],
+    const device packed_float4 *pos_life [[ buffer(1) ]],
     unsigned int vid [[ vertex_id ]]
 ) {
     ColorInOut out;
 
     auto device const &v = vertex_array[vid];
-    auto device const &tran = transform[vid / 9];
+    auto device const &tran = pos_life[vid / 9];
 
     float theta = tran.z;
     float2x2 rot_matrix = float2x2(float2(cos(theta), sin(theta)), float2(-sin(theta), cos(theta)));
     float2 rot_and_trans_pos = float2(v.x, v.y) * rot_matrix + float2(tran.x, tran.y);
 
+    float opacity = mix(0.15, 1.0, tran.w / 3.5);
     out.position = float4(rot_and_trans_pos, 0.0, 1.0);
-    out.color = float4(1.0, 0.0, 0.0, 1.0);
+    out.color = float4(1.0, 0.0, 0.0, opacity);
 
     return out;
 }

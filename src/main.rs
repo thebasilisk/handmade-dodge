@@ -14,6 +14,9 @@ impl Float4 {
     pub fn new(v1 : Float2, v2 : Float2) -> Self {
         Self(v1.0, v1.1, v2.0, v2.1)
     }
+    pub fn from_float3(v : Float3, s : f32) -> Self {
+        Self(v.0, v.1, v.2, s)
+    }
 }
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
@@ -653,12 +656,12 @@ fn main() {
     arrows.reserve(num_arrows as usize);
 
     let (arrow_vertices, _) = gen_random_arrows(&mut arrows, num_arrows, view_width, view_height);
-    let arrow_positions : Vec<Float3> = vec![Float3(0.0, 1.0, PI); num_arrows as usize];
+    let arrow_positions : Vec<Float4> = vec![Float4(0.0, 1.0, PI, 2.5); num_arrows as usize];
 
 
     let arrow_pbuf = device.new_buffer_with_data(
         arrow_positions.as_ptr() as *const _,
-        (mem::size_of::<Float3>() * arrow_positions.len()) as u64,
+        (mem::size_of::<Float4>() * arrow_positions.len()) as u64,
         default_buffer_opts
     );
 
@@ -704,18 +707,19 @@ fn main() {
                     //hero updates
                     hero.update_position((current_x - center_x) / view_width, (current_y - center_y) / view_height);
                     let p = pbuf.contents();
-                    let position_data = [(current_x - center_x) / view_width, (current_y - center_y) / view_height];
+                    let position_data = Float2((current_x - center_x) / view_width, (current_y - center_y) / view_height);
+                    let screen_pos = [0.0f32 , -0.25];
                     //should change position_data to Float2
                     unsafe {
                         std::ptr::copy(
-                            position_data.as_ptr(),
+                            screen_pos.as_ptr(),
                             p as *mut f32,
-                            position_data.len() as usize
+                            screen_pos.len() as usize
                         );
                     }
                     pbuf.did_modify_range(NSRange::new(
                         0 as u64, 
-                        (position_data.len() * size_of::<Float2>()) as u64
+                        (screen_pos.len() * size_of::<Float2>()) as u64
                     ));
 
                     //hero shot updates
@@ -732,7 +736,7 @@ fn main() {
                             let mouse_pos = Float2((mouse_location.x as f32 - center_x) / view_width * 2.0, (mouse_location.y as f32 - center_y) / view_height * 2.0);
                             let target_pellet = &mut pellet_paths[live_pellets as usize]; //necessary?
                             target_pellet.start_t = t;
-                            target_pellet.origin = Float2(position_data[0], position_data[1]);
+                            target_pellet.origin = float2_add(position_data, Float2(screen_pos[0], screen_pos[1]));
                             let dir = float2_subtract(mouse_pos, target_pellet.origin).normalized();
                             target_pellet.rotation = -dir.1.atan2(dir.0) + PI / 2.0;
                             live_pellets += 1;
@@ -740,7 +744,7 @@ fn main() {
                         }
                     }
                     
-                    let ppbuf : Vec<Float2> = pellet_paths.iter().map(|path| path.get_relative_position(t)).collect();
+                    let ppbuf : Vec<Float2> = pellet_paths.iter().map(|path| float2_subtract(path.get_relative_position(t), position_data)).collect();
                     let pp = pellet_pbuf.contents();
                     unsafe {
                         std::ptr::copy(
@@ -754,18 +758,20 @@ fn main() {
                         live_pellets * size_of::<Float3>() as u64
                     ));
 
-                    let apbuf : Vec<Float3> = arrow_paths.iter().map(|path| path.get_relative_pos_rot(t)).collect();
+                    let apbuf : Vec<Float4> = arrow_paths.iter().map(|path| Float4::from_float3(path.get_relative_pos_rot(t), path.get_expiration() - t)).collect();
+                    let arrow_positions_updated : Vec<Float3> = apbuf.iter().map(|data| Float3(data.0, data.1, data.2)).collect();
+                    let apbuf : Vec<Float4> = apbuf.iter().map(|data| Float4(data.0 - position_data.0 + screen_pos[0], data.1 - position_data.1 + screen_pos[1], data.2, data.3)).collect();
                     let ap = arrow_pbuf.contents();
                     unsafe {
                         std::ptr::copy(
                             apbuf.as_ptr(),
-                            ap as *mut Float3,
+                            ap as *mut Float4,
                             apbuf.len() as usize
                         );
                     }
                     arrow_pbuf.did_modify_range(NSRange::new(
                         0 as u64,
-                        (apbuf.len() * size_of::<Float3>()) as u64
+                        (apbuf.len() * size_of::<Float4>()) as u64
                     ));
 
 
@@ -786,7 +792,7 @@ fn main() {
                     encoder.set_render_pipeline_state(&hero_pipeline_state);
                     encoder.set_vertex_buffer(0, Some(&hero_rect_buffer), 0);
                     encoder.set_vertex_buffer(1, Some(&pbuf), 0);
-                    if let Some(_) = check_arrow_collisions(&mut arrows, &hero, &apbuf) {
+                    if let Some(_) = check_arrow_collisions(&mut arrows, &hero, &arrow_positions_updated) {
                         encoder.set_fragment_buffer(0, Some(&hit_color_buf), 0);
                     } else {
                         encoder.set_fragment_buffer(0, Some(&cbuf), 0);
