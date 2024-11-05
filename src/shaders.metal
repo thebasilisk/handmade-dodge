@@ -16,17 +16,24 @@ struct ColorInOut {
     float4 color;
 };
 
-struct PosOut {
+struct PosInOut {
     float4 position [[position]];
 };
 
+struct PelInOut {
+    float4 position [[position]];
+    float2 center;
+    float2 dimensions;
+};
 
-vertex PosOut rectangle_vertex (
+
+//check if works for multiple draws
+vertex PosInOut rectangle_vertex (
     const device rect *rect [[ buffer(0) ]],
     const device float2 *position [[ buffer(1) ]],
     unsigned int vid [[ vertex_id ]]
 ) {
-    PosOut out;
+    PosInOut out;
     auto device const &pos = position[0];
     
     int vid_bit1 = vid % 2;
@@ -41,11 +48,47 @@ vertex PosOut rectangle_vertex (
 }
 
 fragment float4 rectangle_shader (
-    PosOut in [[stage_in]],
+    PosInOut in [[stage_in]],
     const device float4 *color [[ buffer(0) ]]
 ) {
     auto device const &col = color[0];
     return col;
+}
+
+vertex PelInOut rect_vertex_instanced (
+    const device rect *rect [[ buffer(0) ]],
+    const device float2 *position [[ buffer(1) ]],
+    unsigned int vid [[ vertex_id ]],
+    unsigned int id [[ instance_id ]]
+) {
+    PelInOut out;
+    auto device const &pos = position[id];
+    
+    int vid_bit1 = vid % 2;
+    int vid_bit2 = vid / 2;
+    float x = pos.x + (rect->w / 2) * (2 * vid_bit1 - 1);
+    float y = pos.y - (rect->h / 2) * (2 * vid_bit2 - 1);
+
+    float4 out_pos = float4(x, y, 0, 1);
+    out.position = out_pos;
+    out.center = float2(pos.x, pos.y);
+    out.dimensions = float2(rect->w, rect->h);
+
+    return out;
+}
+
+fragment float4 pellet_shader (
+    PelInOut in [[stage_in]]
+) {
+    //constant float* fragment_args [[ buffer(0) ]] //put in args
+    //float screen_width = fragment_args[0];
+    //float screen_height = fragment_args[1];
+
+    //float2 center = float2((in.center.x + 1.0) * screen_width / 2.0, abs(in.center.y - 1.0) * screen_height / 2.0);
+    //float circle_gradient = 1.0 - sqrt(pow(in.position.x - center.x, 2) + pow(in.position.y - center.y, 2));
+    float4 color = float4(0.15, 0.45, 0.8, 1.0);
+
+    return float4(color.xyz, 1.0);
 }
 
 vertex ColorInOut arrow_vertex (

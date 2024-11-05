@@ -1,4 +1,4 @@
-use std::{f32::consts::PI, ffi::{c_float, CString}, mem, os::raw::c_char, ptr::NonNull};
+use std::{f32::consts::PI, ffi::{c_float, CString}, iter, mem, os::raw::c_char, ptr::NonNull};
 use rand::random;
 use objc::rc::autoreleasepool;
 use objc2::rc::Retained;
@@ -26,6 +26,15 @@ impl Float3 {
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct Float2(c_float, c_float);
+impl Float2 {
+    pub fn magnitude(&self) -> f32 {
+        //add cached result
+        (self.0.powf(2.0) + self.1.powf(2.0)).sqrt()
+    }
+    pub fn normalized(&self) -> Float2 {
+        Float2(self.0 / self.magnitude(), self.1 / self.magnitude())
+    }
+}
 
 pub struct Float2x2 {
     row1 : Float2,
@@ -35,6 +44,11 @@ pub struct Float2x2 {
 #[inline]
 fn float2_add(v1 : Float2, v2 : Float2) -> Float2 {
     Float2(v1.0 + v2.0, v1.1 + v2.1)
+}
+
+#[inline]
+fn float2_subtract(v1 : Float2, v2 : Float2) -> Float2 {
+    Float2(v1.0 - v2.0, v1.1 - v2.1)
 }
 
 #[inline]
@@ -175,7 +189,7 @@ fn gen_random_path (t : f32) -> Box<dyn Path>{
                     rotation: (random::<f32>() * PI * 0.5) + PI * 0.75,
                     origin: Float2(0.0, 1.0),
                     start_t: t,
-                    lifetime: t + 3.0 + random::<f32>()
+                    lifetime: 3.0 + random::<f32>()
                 })
             },
             1 => {
@@ -185,7 +199,7 @@ fn gen_random_path (t : f32) -> Box<dyn Path>{
                     rotation: (random::<f32>() * PI * 0.5) + PI * 0.25,
                     origin: Float2(0.0, 1.0),
                     start_t: t,
-                    lifetime: t + 3.0 + random::<f32>()
+                    lifetime: 3.0 + random::<f32>()
                 })
             },
             2 => {
@@ -195,7 +209,7 @@ fn gen_random_path (t : f32) -> Box<dyn Path>{
                     start: random::<f32>() * PI,
                     origin: Float2(0.0, 1.0),
                     start_t: t,
-                    lifetime: t + 3.0 + random::<f32>()
+                    lifetime: 3.0 + random::<f32>()
                 })
             },
             _ => Box::new(StraightPath {
@@ -203,7 +217,7 @@ fn gen_random_path (t : f32) -> Box<dyn Path>{
                 rotation: (random::<f32>() + 0.5f32) * PI,
                 origin: Float2(0.0, 1.0),
                 start_t: t,
-                lifetime: t + 3.0 + random::<f32>()
+                lifetime: 3.0 + random::<f32>()
             })
         }
 }
@@ -275,9 +289,15 @@ fn check_arrow_collisions(arrows : &mut Vec<Arrow>, hero : &Hero, positions: &Ve
     return None;
 }
 
+fn reset_pellet (path : &mut StraightPath, t : f32) {
+    path.origin = Float2(-5.0, -5.0);
+    path.start_t = t + 1000.0;
+}
+
 pub trait Path {
     fn get_position(&self, del_t : f32) -> Float2;
     fn get_position_and_rotation(&self, del_t : f32) -> Float3;
+    fn get_relative_position(&self, t : f32) -> Float2;
     fn get_relative_pos_rot(&self, t : f32) -> Float3;
     fn get_expiration(&self) -> f32;
 }
@@ -297,11 +317,14 @@ impl Path for StraightPath {
     fn get_position_and_rotation(&self, del_t : f32) -> Float3 {
         Float3::new(self.get_position(del_t), self.rotation)
     }
+    fn get_relative_position(&self, t : f32) -> Float2 {
+        self.get_position((t - self.start_t).abs())
+    }
     fn get_relative_pos_rot(&self, t : f32) -> Float3 {
         self.get_position_and_rotation((t - self.start_t).abs())
     }
     fn get_expiration(&self) -> f32 {
-        self.lifetime
+        self.start_t + self.lifetime
     }
 }
 
@@ -321,11 +344,14 @@ impl Path for CirclePath {
     fn get_position_and_rotation(&self, del_t : f32) -> Float3 {
         Float3::new(self.get_position(del_t), -(del_t * self.speed + self.start))
     }
+    fn get_relative_position(&self, t : f32) -> Float2 {
+        self.get_position((t - self.start_t).abs())
+    }
     fn get_relative_pos_rot(&self, t : f32) -> Float3 {
         self.get_position_and_rotation((t - self.start_t).abs())
     }
     fn get_expiration(&self) -> f32 {
-        self.lifetime
+        self.start_t + self.lifetime
     }
 }
 
@@ -345,11 +371,14 @@ impl Path for WavyPath {
     fn get_position_and_rotation(&self, del_t : f32) -> Float3 {
         Float3::new(self.get_position(del_t), self.rotation + ((2.0 * del_t).cos() / ((2.0 * del_t).cos().powf(2.0)+ 1.0).sqrt()).acos())
     }
+    fn get_relative_position(&self, t : f32) -> Float2 {
+        self.get_position((t - self.start_t).abs())
+    }
     fn get_relative_pos_rot(&self, t : f32) -> Float3 {
         self.get_position_and_rotation((t - self.start_t).abs())
     }
     fn get_expiration(&self) -> f32 {
-        self.lifetime
+        self.start_t + self.lifetime
     }
 }
 
@@ -463,6 +492,15 @@ fn prepare_pipeline_state (
         .unwrap();
 
     pipeline_attachment.set_pixel_format(MTLPixelFormat::RGBA8Unorm);
+    
+    pipeline_attachment.set_blending_enabled(true);
+    pipeline_attachment.set_rgb_blend_operation(metal::MTLBlendOperation::Add);
+    pipeline_attachment.set_alpha_blend_operation(metal::MTLBlendOperation::Add);
+    pipeline_attachment.set_source_rgb_blend_factor(metal::MTLBlendFactor::SourceAlpha);
+    pipeline_attachment.set_source_alpha_blend_factor(metal::MTLBlendFactor::SourceAlpha);
+    pipeline_attachment.set_destination_rgb_blend_factor(metal::MTLBlendFactor::OneMinusSourceAlpha);
+    pipeline_attachment.set_destination_alpha_blend_factor(metal::MTLBlendFactor::OneMinusSourceAlpha);
+
 
     device
         .new_render_pipeline_state(&pipeline_state_descriptor)
@@ -499,12 +537,18 @@ fn main() {
         "rectangle_vertex", 
         "rectangle_shader"
     );
+    let pellet_pipeline_state = prepare_pipeline_state(
+        &device, 
+        "rect_vertex_instanced",
+        "pellet_shader"
+    );
     let arrow_pipeline_state = prepare_pipeline_state(
         &device, 
         "arrow_vertex", 
         "fragment_shader"
     );
 
+    let default_buffer_opts = MTLResourceOptions::CPUCacheModeDefaultCache | MTLResourceOptions::StorageModeManaged;
     let command_queue = device.new_command_queue();
 
     unsafe {
@@ -563,6 +607,44 @@ fn main() {
         MTLResourceOptions::CPUCacheModeDefaultCache | MTLResourceOptions::StorageModeManaged
     );
 
+    let pellet_buffer = {
+        let pellet_rect = vec![Rect{
+            w: 10.0 / view_width,
+            h: 10.0 / view_height,
+        }];
+        device.new_buffer_with_data(
+            pellet_rect.as_ptr() as *const _, 
+            size_of::<Rect>() as u64, 
+            MTLResourceOptions::CPUCacheModeDefaultCache | MTLResourceOptions::StorageModeManaged
+        )
+    };
+    let mut pellet_paths : Vec<StraightPath> = {
+        (0..9).map(|_| StraightPath{
+            speed: 1.0,
+            rotation: 0.0,
+            origin: Float2(-5.0, -5.0),
+            start_t: 1000.0,
+            lifetime: 2.0,
+        }).collect()
+    };
+    let pellet_starts = vec![Float3(0.0, 0.0, 0.0) ; 10];
+
+    let pellet_pbuf = device.new_buffer_with_data(
+        pellet_starts.as_ptr() as *const _, 
+        (size_of::<Float3>() * pellet_starts.len()) as u64, 
+        default_buffer_opts
+    );
+
+    let screen_size_buf = {
+        let data = vec![view_width, view_height];
+
+        device.new_buffer_with_data(data.as_ptr() as *const _, 
+            size_of::<Float2>() as u64, 
+            default_buffer_opts
+        )
+    };
+
+    let mut live_pellets : u64 = 0;
     // let arrow1_pos = [-150.0f32 / view_width, 100.0 / view_height, PI / 2.0];
     // let arrow2_pos = [-150.0f32 / view_width, 1.0 / view_height, PI / 2.0];
 
@@ -577,7 +659,7 @@ fn main() {
     let arrow_pbuf = device.new_buffer_with_data(
         arrow_positions.as_ptr() as *const _,
         (mem::size_of::<Float3>() * arrow_positions.len()) as u64,
-        MTLResourceOptions::CPUCacheModeDefaultCache | MTLResourceOptions::StorageModeManaged
+        default_buffer_opts
     );
 
     let dummy_vertex_data = build_arrow_vertices(30.0 / view_width, 150.0 / view_height);
@@ -593,12 +675,16 @@ fn main() {
     gen_random_paths(&mut arrow_paths, num_arrows);
 
     
+    //let mut hero_projectiles : Vec<Box<dyn Path>>;
 
     let fps = 60.0;
-    let mut key_pressed : u16 = 112;
     let mut frame_time = get_next_frame(fps);
+
+    let mut key_pressed : u16 = 112;
     let mut mouse_down = false;
-    let mut mouse_location = CGPoint { x: 0.0, y: 0.0};
+    let mut mouse_location = CGPoint {x: 0.0, y: 0.0};
+
+    let mut shot_cd = 0.0;
 
     let mut t = 0.0;
 
@@ -614,10 +700,12 @@ fn main() {
                         13 => current_y += 10.0,
                         _ => ()
                     }
+
+                    //hero updates
                     hero.update_position((current_x - center_x) / view_width, (current_y - center_y) / view_height);
                     let p = pbuf.contents();
                     let position_data = [(current_x - center_x) / view_width, (current_y - center_y) / view_height];
-                    
+                    //should change position_data to Float2
                     unsafe {
                         std::ptr::copy(
                             position_data.as_ptr(),
@@ -629,6 +717,43 @@ fn main() {
                         0 as u64, 
                         (position_data.len() * size_of::<Float2>()) as u64
                     ));
+
+                    //hero shot updates
+                    for path in pellet_paths.iter_mut() {
+                        if path.get_expiration() < t {
+                            reset_pellet(path, t);
+                            live_pellets -= 1;
+                        }
+                    };
+                    pellet_paths.sort_by(|a, b| a.get_expiration().total_cmp(&b.get_expiration()));
+
+                    if mouse_down {
+                        if shot_cd <= t && live_pellets < 9 {
+                            let mouse_pos = Float2((mouse_location.x as f32 - center_x) / view_width * 2.0, (mouse_location.y as f32 - center_y) / view_height * 2.0);
+                            let target_pellet = &mut pellet_paths[live_pellets as usize]; //necessary?
+                            target_pellet.start_t = t;
+                            target_pellet.origin = Float2(position_data[0], position_data[1]);
+                            let dir = float2_subtract(mouse_pos, target_pellet.origin).normalized();
+                            target_pellet.rotation = -dir.1.atan2(dir.0) + PI / 2.0;
+                            live_pellets += 1;
+                            shot_cd = t + 0.25;
+                        }
+                    }
+                    
+                    let ppbuf : Vec<Float2> = pellet_paths.iter().map(|path| path.get_relative_position(t)).collect();
+                    let pp = pellet_pbuf.contents();
+                    unsafe {
+                        std::ptr::copy(
+                            ppbuf.as_ptr(), 
+                            pp as *mut Float2, 
+                            ppbuf.len() as usize
+                        );
+                    }
+                    pellet_pbuf.did_modify_range(NSRange::new(
+                        0 as u64,
+                        live_pellets * size_of::<Float3>() as u64
+                    ));
+
                     let apbuf : Vec<Float3> = arrow_paths.iter().map(|path| path.get_relative_pos_rot(t)).collect();
                     let ap = arrow_pbuf.contents();
                     unsafe {
@@ -642,6 +767,9 @@ fn main() {
                         0 as u64,
                         (apbuf.len() * size_of::<Float3>()) as u64
                     ));
+
+
+
                     let render_pass_descriptor = RenderPassDescriptor::new();
                     let drawable = match launch_screen.next_drawable() {
                         Some(drawable) => drawable,
@@ -653,6 +781,8 @@ fn main() {
                     );
                     let command_buffer = command_queue.new_command_buffer();
                     let encoder = command_buffer.new_render_command_encoder(&render_pass_descriptor);
+
+                    //hero draws
                     encoder.set_render_pipeline_state(&hero_pipeline_state);
                     encoder.set_vertex_buffer(0, Some(&hero_rect_buffer), 0);
                     encoder.set_vertex_buffer(1, Some(&pbuf), 0);
@@ -662,7 +792,16 @@ fn main() {
                         encoder.set_fragment_buffer(0, Some(&cbuf), 0);
                     }
                     encoder.draw_primitives(MTLPrimitiveType::TriangleStrip, 0, 4);
-                    
+
+                    //hero shot draws
+                    //SUPER BROKEN CHECK HIM TWITTER
+                    encoder.set_render_pipeline_state(&pellet_pipeline_state);
+                    encoder.set_vertex_buffer(0, Some(&pellet_buffer), 0);
+                    encoder.set_vertex_buffer(1, Some(&pellet_pbuf), 0);
+                    encoder.set_fragment_buffer(0, Some(&screen_size_buf), 0);
+                    encoder.draw_primitives_instanced(MTLPrimitiveType::TriangleStrip, 0, 4, live_pellets);
+
+                    //arrow draws
                     encoder.set_render_pipeline_state(&arrow_pipeline_state);
                     encoder.set_vertex_buffer(0, Some(&arrow_vbuf), 0);
                     encoder.set_vertex_buffer(1, Some(&arrow_pbuf), 0);
