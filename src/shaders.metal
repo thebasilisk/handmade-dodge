@@ -94,7 +94,7 @@ fragment float4 pellet_shader (
 
 vertex ColorInOut arrow_vertex (
     const device float2 *vertex_array [[ buffer(0) ]],
-    const device packed_float4 *pos_life [[ buffer(1) ]],
+    const device float4 *pos_life [[ buffer(1) ]],
     unsigned int vid [[ vertex_id ]]
 ) {
     ColorInOut out;
@@ -130,4 +130,19 @@ fragment float4 fragment_shader(
     float opacity = (fov - abs(vision_cone_rotation - theta));
 
     return float4(in.color.rgb , in.color.a * opacity);
+}
+
+vertex ColorInOut triangle_vertex (
+    const device float2 *position,
+    const device float4 *color,
+    unsigned int vid [[vertex_id]]
+) {
+    ColorInOut out;
+    auto device const &pos = position[vid];
+    auto device const &col = color[0];
+
+    out.position = float4(pos, 0.0, 1.0);
+    out.color = col;
+
+    return out;
 }

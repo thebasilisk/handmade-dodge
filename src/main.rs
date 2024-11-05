@@ -102,14 +102,23 @@ pub trait Collider {
 struct Hero {
     rect : Rect,
     color: Color,
-    position : Float2 
+    position : Float2,
+    health : i8,
 }
 
 impl Hero {
     fn update_position(&mut self, current_x : f32, current_y: f32) {
         self.position = Float2(current_x, current_y);
     }
-
+    fn hit(&mut self) {
+        self.health -= 1;
+        if self.health <= 0 {
+            self.die();
+        }
+    }
+    fn die(&self) {
+        println!("Lose!");
+    }
     // fn update_color(&mut self, new_color : Float4) {
     //     self.color.r = new_color.0;
     //     self.color.g = new_color.1;
@@ -148,6 +157,23 @@ impl Collider for Arrow {
             float2_add(apply_rotation_float2(Float2(0.0, self.height / 2.0), -theta), pos), 
             float2_add(apply_rotation_float2(Float2(0.0, -self.height / 2.0), -theta), pos)
         )
+    }
+}
+
+struct Boss {
+    health : i8,
+    phase : u8,
+}
+
+impl Boss {
+    fn do_boss_hits (&mut self, n : i8) {
+        self.health -= 3 * n;
+        if self.health <= 0 {
+            self.die();
+        }
+    }
+    fn die(&self) {
+        println!("Win!");
     }
 }
 
@@ -275,6 +301,13 @@ fn line_rect_collision(line : Float4, rect : Float4)-> bool {
     return false;
 }
 
+fn point_rect_collision (p: Float2, r : Float4) -> bool {
+    if r.0 <= p.0 && p.0 <= r.2 && r.1 <= p.1 && p.1 <= r.3 {
+        return true;
+    }
+    return false;
+}
+
 fn check_arrow_collisions(arrows : &mut Vec<Arrow>, hero : &Hero, positions: &Vec<Float3>) -> Option<usize>{
     let hero_collider = hero.get_collider(positions);
     for arrow in arrows {
@@ -296,12 +329,28 @@ fn reset_pellet (path : &mut StraightPath, t : f32) {
     path.start_t = t + 1000.0;
 }
 
+fn check_pellet_collisions (paths : &mut Vec<StraightPath>, t : f32) -> Option<i8>{
+    let mut hits = 0;
+    for path in paths {
+        let pos = path.get_relative_position(t);
+        if point_rect_collision(pos, Float4(-0.1, 0.8, 0.1, 1.0)) {
+            reset_pellet(path, t);
+            hits += 1;
+        }
+    };
+    match hits {
+        0 => None,
+        _ => Some(hits)
+    }
+}
+
 pub trait Path {
     fn get_position(&self, del_t : f32) -> Float2;
     fn get_position_and_rotation(&self, del_t : f32) -> Float3;
     fn get_relative_position(&self, t : f32) -> Float2;
     fn get_relative_pos_rot(&self, t : f32) -> Float3;
     fn get_expiration(&self) -> f32;
+    fn set_dead(&mut self);
 }
 
 struct StraightPath {
@@ -327,6 +376,9 @@ impl Path for StraightPath {
     }
     fn get_expiration(&self) -> f32 {
         self.start_t + self.lifetime
+    }
+    fn set_dead(&mut self) {
+        self.start_t = -self.lifetime;
     }
 }
 
@@ -355,6 +407,9 @@ impl Path for CirclePath {
     fn get_expiration(&self) -> f32 {
         self.start_t + self.lifetime
     }
+    fn set_dead(&mut self) {
+        self.start_t = -self.lifetime;
+    }
 }
 
 struct WavyPath {
@@ -381,6 +436,9 @@ impl Path for WavyPath {
     }
     fn get_expiration(&self) -> f32 {
         self.start_t + self.lifetime
+    }
+    fn set_dead(&mut self) {
+        self.start_t = -self.lifetime;
     }
 }
 
@@ -549,6 +607,11 @@ fn main() {
         "arrow_vertex", 
         "fragment_shader"
     );
+    let triangle_pipeline_state = prepare_pipeline_state(
+        &device, 
+        "triangle_vertex", 
+        "fragment_shader"
+    );
 
     let default_buffer_opts = MTLResourceOptions::CPUCacheModeDefaultCache | MTLResourceOptions::StorageModeManaged;
     let command_queue = device.new_command_queue();
@@ -577,6 +640,7 @@ fn main() {
             g: 0.8, 
             a: 1.0 
         },
+        health : 10,
         position : Float2((current_x - center_x) / view_width, (current_y - center_y) / view_height)
     };
 
@@ -655,6 +719,24 @@ fn main() {
         )
     };
 
+    let boss_data = vec![
+        Float2(0.2f32, 1.0),
+        Float2(-0.2, 1.0),
+        Float2(0.0, 0.8)
+    ];
+    let boss_vbuf = device.new_buffer_with_data(
+        boss_data.as_ptr() as *const _, 
+        (boss_data.len() * size_of::<f32>()) as u64, 
+        default_buffer_opts
+    );
+
+    let boss_color_data = vec![0.7f32, 0.15, 0.55, 1.0];
+    let boss_cbuf = device.new_buffer_with_data(
+        boss_color_data.as_ptr() as *const _, 
+        (size_of::<f32>() * boss_color_data.len()) as u64, 
+        MTLResourceOptions::CPUCacheModeDefaultCache | MTLResourceOptions::StorageModeManaged
+    );
+
     let mut live_pellets : u64 = 0;
     // let arrow1_pos = [-150.0f32 / view_width, 100.0 / view_height, PI / 2.0];
     // let arrow2_pos = [-150.0f32 / view_width, 1.0 / view_height, PI / 2.0];
@@ -688,6 +770,11 @@ fn main() {
     
     //let mut hero_projectiles : Vec<Box<dyn Path>>;
 
+    let mut boss = Boss {
+        health : 125,
+        phase : 0
+    };
+
     let fps = 60.0;
     let mut frame_time = get_next_frame(fps);
 
@@ -696,6 +783,7 @@ fn main() {
     let mut mouse_location = CGPoint {x: 0.0, y: 0.0};
 
     let mut shot_cd = 0.0;
+    let mut hero_hit_t = 0.0;
 
     let mut t = 0.0;
     let time_scale = 0.8;
@@ -747,12 +835,32 @@ fn main() {
                         (mouse_theta.len() * size_of::<f32>()) as u64
                     ));
 
+                    let bb = boss_vbuf.contents();
+                    let b_buf : Vec<Float2> = boss_data.iter().map(|pos| float2_subtract(*pos, position_data)).collect();
+                    unsafe {
+                        std::ptr::copy(
+                            b_buf.as_ptr(),
+                            bb as *mut Float2,
+                            b_buf.len() as usize
+                        );
+                    }
+                    boss_vbuf.did_modify_range(NSRange::new(
+                        0 as u64, 
+                        (b_buf.len() * size_of::<Float2>()) as u64
+                    ));
                     //hero shot updates
                     for path in pellet_paths.iter_mut() {
                         if path.get_expiration() < t {
                             reset_pellet(path, t);
                             live_pellets -= 1;
                         }
+                    };
+                    match check_pellet_collisions(&mut pellet_paths, t) {
+                        Some(x) => {
+                            boss.do_boss_hits(x);
+                            live_pellets -= 1;
+                        },
+                        _ => ()
                     };
                     pellet_paths.sort_by(|a, b| a.get_expiration().total_cmp(&b.get_expiration()));
 
@@ -817,7 +925,12 @@ fn main() {
                     encoder.set_render_pipeline_state(&hero_pipeline_state);
                     encoder.set_vertex_buffer(0, Some(&hero_rect_buffer), 0);
                     encoder.set_vertex_buffer(1, Some(&pbuf), 0);
-                    if let Some(_) = check_arrow_collisions(&mut arrows, &hero, &arrow_positions_updated) {
+                    if let Some(i) = check_arrow_collisions(&mut arrows, &hero, &arrow_positions_updated) {
+                        arrow_paths[i].set_dead();
+                        hero.hit();
+                        hero_hit_t = t + 0.2;
+                    }
+                    if hero_hit_t > t {   
                         encoder.set_fragment_buffer(0, Some(&hit_color_buf), 0);
                     } else {
                         encoder.set_fragment_buffer(0, Some(&cbuf), 0);
@@ -837,6 +950,12 @@ fn main() {
                     encoder.set_vertex_buffer(1, Some(&arrow_pbuf), 0);
                     encoder.set_fragment_buffer(0, Some(&rot_buf), 0);
                     encoder.draw_primitives(MTLPrimitiveType::Triangle, 0, 9 * num_arrows as u64);
+
+                    encoder.set_render_pipeline_state(&triangle_pipeline_state);
+                    encoder.set_vertex_buffer(0, Some(&boss_vbuf), 0);
+                    encoder.set_vertex_buffer(1, Some(&boss_cbuf), 0);
+                    encoder.set_fragment_buffer(0, Some(&rot_buf), 0);
+                    encoder.draw_primitives(MTLPrimitiveType::Triangle, 0, 3);
                     
                     encoder.end_encoding();
                     command_buffer.present_drawable(&drawable);
