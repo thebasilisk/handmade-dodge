@@ -55,13 +55,13 @@ fragment float4 rectangle_shader (
     return col;
 }
 
-vertex PelInOut rect_vertex_instanced (
+vertex ColorInOut rect_vertex_instanced (
     const device rect *rect [[ buffer(0) ]],
     const device float2 *position [[ buffer(1) ]],
     unsigned int vid [[ vertex_id ]],
     unsigned int id [[ instance_id ]]
 ) {
-    PelInOut out;
+    ColorInOut out;
     auto device const &pos = position[id];
     
     int vid_bit1 = vid % 2;
@@ -71,8 +71,9 @@ vertex PelInOut rect_vertex_instanced (
 
     float4 out_pos = float4(x, y, 0, 1);
     out.position = out_pos;
-    out.center = float2(pos.x, pos.y);
-    out.dimensions = float2(rect->w, rect->h);
+    out.color = float4(0.15, 0.45, 0.8, 1.0);
+    // out.center = float2(pos.x, pos.y);
+    // out.dimensions = float2(rect->w, rect->h);
 
     return out;
 }
@@ -112,6 +113,21 @@ vertex ColorInOut arrow_vertex (
     return out;
 }
 
-fragment float4 fragment_shader(ColorInOut in [[stage_in]]) {
-    return in.color;
+fragment float4 fragment_shader(
+    ColorInOut in [[stage_in]],
+    const device float *rot [[ buffer(0) ]]
+) {
+    auto device const &vision_cone_rotation = rot[0];
+
+    float2 hero_pos_lock = float2(1024.0 / 2.0, 768.0 / 1.625);
+    float2 rel_pos = in.position.xy - hero_pos_lock;
+
+    float theta = atan2(rel_pos.x, -rel_pos.y);
+    float fov = M_PI_4_F;
+    // float vision_cone_rotation = M_PI_2_F;
+
+    //float opacity = mix(1.0, 0.2, abs(vision_cone_rotation - theta) / fov);
+    float opacity = (fov - abs(vision_cone_rotation - theta));
+
+    return float4(in.color.rgb , in.color.a * opacity);
 }

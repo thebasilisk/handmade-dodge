@@ -231,7 +231,6 @@ fn gen_random_paths (paths : &mut Vec<Box<dyn Path>>, n : u16) {
 }
 
 fn regen_dead_arrows (paths : &mut Vec<Box<dyn Path>>, t : f32) {
-    //println!("{}", paths[0].get_expiration() < t);
     for path in paths.iter_mut() {
         if path.get_expiration() < t {
             *path = gen_random_path(t); 
@@ -543,7 +542,7 @@ fn main() {
     let pellet_pipeline_state = prepare_pipeline_state(
         &device, 
         "rect_vertex_instanced",
-        "pellet_shader"
+        "fragment_shader"
     );
     let arrow_pipeline_state = prepare_pipeline_state(
         &device, 
@@ -604,6 +603,15 @@ fn main() {
         MTLResourceOptions::CPUCacheModeDefaultCache | MTLResourceOptions::StorageModeManaged
     );
 
+    let rot_buf = {
+        let data = vec![0.0f32];
+        device.new_buffer_with_data(
+            data.as_ptr() as *const _, 
+            size_of::<f32>() as u64,
+            default_buffer_opts
+        )
+    };
+
     let hit_color_buf = device.new_buffer_with_data(
         hit_color_data.as_ptr() as *const _, 
         (size_of::<f32>() * hit_color_data.len()) as u64, 
@@ -651,7 +659,7 @@ fn main() {
     // let arrow1_pos = [-150.0f32 / view_width, 100.0 / view_height, PI / 2.0];
     // let arrow2_pos = [-150.0f32 / view_width, 1.0 / view_height, PI / 2.0];
 
-    let num_arrows = 64;
+    let num_arrows = 24;
     let mut arrows = Vec::<Arrow>::new();
     arrows.reserve(num_arrows as usize);
 
@@ -690,12 +698,12 @@ fn main() {
     let mut shot_cd = 0.0;
 
     let mut t = 0.0;
-
+    let time_scale = 0.8;
     loop {
         autoreleasepool(|| {
                 if unsafe { frame_time.compare(&NSDate::now()) } == NSComparisonResult::Ascending {
                     frame_time = get_next_frame(fps);
-                    t += 1.0 / fps as f32;
+                    t += time_scale / fps as f32;
                     match key_pressed {
                         0 => current_x -= 10.0,
                         1 => current_y -= 10.0,
@@ -703,13 +711,18 @@ fn main() {
                         13 => current_y += 10.0,
                         _ => ()
                     }
-
                     //hero updates
                     hero.update_position((current_x - center_x) / view_width, (current_y - center_y) / view_height);
                     let p = pbuf.contents();
                     let position_data = Float2((current_x - center_x) / view_width, (current_y - center_y) / view_height);
-                    let screen_pos = [0.0f32 , -0.25];
-                    //should change position_data to Float2
+                    let hero_offset = Float2(0.0, -0.25);
+                    let screen_pos = [hero_offset.0, hero_offset.1];
+
+                    let mouse_pos = Float2((mouse_location.x as f32 - center_x) / view_width * 2.0, (mouse_location.y as f32 - center_y) / view_height * 2.0);
+                    let mouse_dir = float2_subtract(mouse_pos, hero_offset).normalized();
+                    let r = rot_buf.contents();
+                    let mouse_theta = vec![mouse_dir.0.atan2(mouse_dir.1)];
+
                     unsafe {
                         std::ptr::copy(
                             screen_pos.as_ptr(),
@@ -720,6 +733,18 @@ fn main() {
                     pbuf.did_modify_range(NSRange::new(
                         0 as u64, 
                         (screen_pos.len() * size_of::<Float2>()) as u64
+                    ));
+
+                    unsafe {
+                        std::ptr::copy(
+                            mouse_theta.as_ptr(),
+                            r as *mut f32,
+                            mouse_theta.len() as usize
+                        );
+                    }
+                    rot_buf.did_modify_range(NSRange::new(
+                        0 as u64, 
+                        (mouse_theta.len() * size_of::<f32>()) as u64
                     ));
 
                     //hero shot updates
@@ -733,12 +758,12 @@ fn main() {
 
                     if mouse_down {
                         if shot_cd <= t && live_pellets < 9 {
-                            let mouse_pos = Float2((mouse_location.x as f32 - center_x) / view_width * 2.0, (mouse_location.y as f32 - center_y) / view_height * 2.0);
                             let target_pellet = &mut pellet_paths[live_pellets as usize]; //necessary?
                             target_pellet.start_t = t;
-                            target_pellet.origin = float2_add(position_data, Float2(screen_pos[0], screen_pos[1]));
-                            let dir = float2_subtract(mouse_pos, target_pellet.origin).normalized();
-                            target_pellet.rotation = -dir.1.atan2(dir.0) + PI / 2.0;
+                            target_pellet.origin = float2_add(position_data, hero_offset);
+                            //let pellet_dir = float2_subtract(mouse_pos, target_pellet.origin).normalized();
+                            //target_pellet.rotation = -pellet_dir.1.atan2(pellet_dir.0) + PI / 2.0;
+                            target_pellet.rotation = mouse_theta[0];
                             live_pellets += 1;
                             shot_cd = t + 0.25;
                         }
@@ -800,17 +825,17 @@ fn main() {
                     encoder.draw_primitives(MTLPrimitiveType::TriangleStrip, 0, 4);
 
                     //hero shot draws
-                    //SUPER BROKEN CHECK HIM TWITTER
                     encoder.set_render_pipeline_state(&pellet_pipeline_state);
                     encoder.set_vertex_buffer(0, Some(&pellet_buffer), 0);
                     encoder.set_vertex_buffer(1, Some(&pellet_pbuf), 0);
-                    encoder.set_fragment_buffer(0, Some(&screen_size_buf), 0);
+                    encoder.set_fragment_buffer(0, Some(&rot_buf), 0);
                     encoder.draw_primitives_instanced(MTLPrimitiveType::TriangleStrip, 0, 4, live_pellets);
 
                     //arrow draws
                     encoder.set_render_pipeline_state(&arrow_pipeline_state);
                     encoder.set_vertex_buffer(0, Some(&arrow_vbuf), 0);
                     encoder.set_vertex_buffer(1, Some(&arrow_pbuf), 0);
+                    encoder.set_fragment_buffer(0, Some(&rot_buf), 0);
                     encoder.draw_primitives(MTLPrimitiveType::Triangle, 0, 9 * num_arrows as u64);
                     
                     encoder.end_encoding();
@@ -856,6 +881,9 @@ fn main() {
                                 }
                                 NSEventType::LeftMouseUp => {
                                     mouse_down = false;
+                                }
+                                NSEventType::MouseMoved => {
+                                    mouse_location = e.locationInWindow();
                                 }
                                 _ => app.sendEvent(&e),
                             }
