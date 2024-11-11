@@ -129,7 +129,7 @@ fragment float4 fragment_shader(
     //float opacity = mix(1.0, 0.2, abs(vision_cone_rotation - theta) / fov);
     float opacity = (fov - abs(vision_cone_rotation - theta));
 
-    return float4(in.color.rgb , in.color.a * opacity);
+    return float4(in.color.rgb , in.color.a * opacity * 2.0);
 }
 
 vertex ColorInOut triangle_vertex (
@@ -143,6 +143,39 @@ vertex ColorInOut triangle_vertex (
 
     out.position = float4(pos, 0.0, 1.0);
     out.color = col;
+
+    return out;
+}
+
+vertex ColorInOut tile_vertex (
+    const device rect *rect [[ buffer(0) ]],
+    const device float2 *position [[ buffer(1) ]],
+    unsigned int vid [[ vertex_id ]],
+    unsigned int id [[ instance_id ]]
+) {
+    ColorInOut out;
+    auto device const &pos = position[id];
+    
+    int vid_bit1 = vid % 2;
+    int vid_bit2 = vid / 2;
+    float x = pos.x + (rect->w / 2) * (2 * vid_bit1 - 1);
+    float y = pos.y - (rect->h / 2) * (2 * vid_bit2 - 1);
+
+    float4 out_pos = float4(x, y, 0, 1);
+    out.position = out_pos;
+
+    switch (id % 2) {
+        case 0: 
+            out.color = float4(0.15, 0.15, 0.15, 1.0);
+            break;
+        case 1:
+            out.color = float4(0.25, 0.25, 0.25, 1.0);
+            break;
+        default: 
+            break;
+    }
+    // out.center = float2(pos.x, pos.y);
+    // out.dimensions = float2(rect->w, rect->h);
 
     return out;
 }

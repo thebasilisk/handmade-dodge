@@ -1,4 +1,4 @@
-use std::{f32::consts::PI, ffi::{c_float, CString}, iter, mem, os::raw::c_char, ptr::NonNull};
+use std::{f32::consts::PI, ffi::{c_float, CString}, mem, os::raw::c_char, ptr::NonNull};
 use rand::random;
 use objc::rc::autoreleasepool;
 use objc2::rc::Retained;
@@ -92,6 +92,11 @@ struct Color {
 struct Rect {
     w : f32,
     h : f32,
+}
+impl Rect {
+    fn new(width : f32, height : f32) -> Self {
+        Self { w: width, h: height }
+    }
 }
 
 pub trait Collider {
@@ -576,6 +581,155 @@ fn prepare_render_pass_descriptor( render_pass_descriptor : &RenderPassDescripto
     render_pass_attachment.set_store_action(MTLStoreAction::Store);
 }
 
+fn make_buf<T>(data : &Vec<T>, device : &DeviceRef) -> Buffer {
+    device.new_buffer_with_data(
+        data.as_ptr() as *const _, 
+        (mem::size_of::<T>() * data.len())as u64,
+        MTLResourceOptions::CPUCacheModeDefaultCache | MTLResourceOptions::StorageModeManaged
+    )
+}
+
+fn make_buf_with_cap<T>(data : &Vec<T>, device : &DeviceRef, capacity : usize) -> Buffer {
+    device.new_buffer_with_data(
+        data.as_ptr() as *const _, 
+        (mem::size_of::<T>() * capacity)as u64,
+        MTLResourceOptions::CPUCacheModeDefaultCache | MTLResourceOptions::StorageModeManaged
+    )
+}
+
+fn copy_to_buf<T>(data : &Vec<T>, dst : &Buffer) {
+    let buf_pointer = dst.contents(); //how does this grab a mut pointer from a non mutable reference?
+    unsafe {
+        std::ptr::copy(
+            data.as_ptr(),
+            buf_pointer as *mut T,
+            data.len() as usize
+        );
+    }
+    dst.did_modify_range(NSRange::new(
+        0 as u64, 
+        (data.len() * size_of::<T>()) as u64
+    ));
+}
+
+fn draw_shape_instanced (vertex_buffer : &Buffer, position_buffer : &Buffer, encoder : &RenderCommandEncoderRef, shape : MTLPrimitiveType, vertex_count : u64, instance_count : u64) {
+    encoder.set_vertex_buffer(0, Some(&vertex_buffer), 0);
+    encoder.set_vertex_buffer(1, Some(position_buffer), 0);
+    encoder.draw_primitives_instanced(shape, 0, vertex_count, instance_count);
+}
+
+fn draw_shape (vertex_buffer : &Buffer, position_buffer : &Buffer, encoder : &RenderCommandEncoderRef, shape : MTLPrimitiveType, vertex_count : u64) {
+    encoder.set_vertex_buffer(0, Some(vertex_buffer), 0);
+    encoder.set_vertex_buffer(1, Some(position_buffer), 0);
+    encoder.draw_primitives(shape, 0, vertex_count);
+}
+pub trait Drawable {
+    fn draw(&mut self, encoder : &RenderCommandEncoderRef, device : &DeviceRef);
+}
+// struct Background {
+//     device : DeviceRef,
+//     encoder : RenderCommandEncoderRef,
+//     bg_elements : Vec<Box<dyn Drawable>>,
+// }
+// impl Drawable for Background {
+//     fn draw(&self) {
+//         for element in &self.bg_elements {
+//             element.draw();
+//         }
+//     }
+// }
+// struct Tile {
+//     rect : Rect,
+//     vbuf : Buffer,
+// }
+// impl Tile {
+//     fn new(rect : Rect, device : &DeviceRef) -> Self {
+//         Self { 
+//             rect, 
+//             vbuf: make_buf(&vec![rect], device)
+//         }
+//     }
+// }
+// enum Cached<T> {
+//     Cached(T),
+//     Updated(T),
+// }
+// impl <T> Cached<T> {
+//     fn get(&self) -> &T {
+//         match self {
+//             Cached::Cached(val) => val,
+//             Cached::Updated(val) => val,
+//         }
+//     }
+// }
+// struct TileMap {
+//     positions : Vec<Float2>,
+//     pbuf : Buffer,
+//     updated : bool,
+// }
+// impl TileMap {
+//     fn new(device : &DeviceRef) -> Self {
+//         Self {
+//             positions: Vec::with_capacity(512),
+//             pbuf: device.new_buffer((size_of::<Float2>() * 512) as u64, MTLResourceOptions::StorageModeManaged | MTLResourceOptions::CPUCacheModeDefaultCache),
+//             updated : true
+//         }
+//     }
+//     fn fill_positions(&mut self, origin : Float2, width : f32, height : f32, rows : i32, columns : i32) {
+//         let pos_vec = match &mut self.positions {
+//             Cached::Cached(val) => val,
+//             Cached::Updated(val) => val,
+//             };
+//         for i in 0..rows {
+//             for j in 0.. columns {
+//                 pos_vec.push(float2_add(origin, Float2(j as f32 * width, i as f32 * height)));
+//             }
+//         }
+//     }
+//     // fn get_or_update_pbuf(&mut self, device : &DeviceRef) -> &mut Buffer {
+//     //     match &self.positions {
+//     //         //not implemented correctly, use closures maybe to cache instead
+//     //         Cached::Cached(_) => self.pbuf.get_or_insert(make_buf(&self.positions.get(), &device)),
+//     //         Cached::Updated(x) => {
+//     //             copy_to_buf(&x, self.pbuf.get_or_insert(make_buf(&x, &device)));
+//     //             self.pbuf.get_or_insert(make_buf(&self.positions.get(), &device))
+//     //         }
+//     //     }
+//     // }
+//     fn draw(&mut self, tile : Tile, encoder : &RenderCommandEncoderRef, device : &DeviceRef) {
+//         if let Cached::Updated(x) = &self.positions {
+//             copy_to_buf(x, &self.pbuf);
+//         };
+//         draw_shape_instanced(&tile.vbuf, &self.pbuf, encoder, MTLPrimitiveType::TriangleStrip, 4, self.pbuf.length() / size_of::<Float2>() as u64);
+//     }
+// }
+
+// impl Drawable for TileMap {
+//     fn draw(&mut self, tile : Tile, encoder : &RenderCommandEncoderRef, device : &DeviceRef) {
+//         // match self.pbuf {
+//         //     Some(buf) => copy_to_buf(&self.positions, &buf),
+//         //     None => self.update_pbuf(),
+//         // }
+//         draw_shape_instanced(&tile.vbuf, self.get_or_update_pbuf(device), encoder, MTLPrimitiveType::TriangleStrip, 4, self.positions.get().len() as u64);
+//     }
+// }
+
+fn fill_positions(pos_vec : &mut Vec<Float2>, origin : Float2, width : f32, height : f32, rows : i32, columns : i32) {
+    for i in 0..rows {
+        for j in 0.. columns {
+            pos_vec.push(float2_add(origin, Float2(j as f32 * width, i as f32 * height)));
+        }
+    }
+}
+fn make_rect (width : f32, height : f32, device : &DeviceRef) -> Buffer {
+    let rect = Rect {
+        w: width,
+        h: height,
+    };
+    make_buf(&vec![rect], device)
+    //make_buf(data, device)
+}
+
 fn main() {
     let mtm = MainThreadMarker::new().expect("Current thread isn't main");
     let app = initialize_app(mtm);
@@ -612,8 +766,13 @@ fn main() {
         "triangle_vertex", 
         "fragment_shader"
     );
+    let tile_pipeline_state = prepare_pipeline_state(
+        &device, 
+        "tile_vertex", 
+        "fragment_shader"
+    );
 
-    let default_buffer_opts = MTLResourceOptions::CPUCacheModeDefaultCache | MTLResourceOptions::StorageModeManaged;
+    //let default_buffer_opts = MTLResourceOptions::CPUCacheModeDefaultCache | MTLResourceOptions::StorageModeManaged;
     let command_queue = device.new_command_queue();
 
     unsafe {
@@ -645,54 +804,18 @@ fn main() {
     };
 
     let hero_rect = vec![hero.rect];
-    let hero_rect_buffer = device.new_buffer_with_data(
-        hero_rect.as_ptr() as *const _, 
-        mem::size_of::<Rect>() as u64,
-        MTLResourceOptions::CPUCacheModeDefaultCache | MTLResourceOptions::StorageModeManaged
-    );
-
-    let pbuf = device.new_buffer_with_data(
-        start_position.as_ptr() as *const _,
-        (mem::size_of::<f32>() * start_position.len()) as u64,
-        MTLResourceOptions::CPUCacheModeDefaultCache | MTLResourceOptions::StorageModeManaged
-    );
+    let hero_rect_buffer = make_buf(&hero_rect, &device);
+    let pbuf = make_buf(&start_position.to_vec(), &device);
 
     //let hero_color = hero.color;
     let hero_color_data = vec![hero.color.r, hero.color.g, hero.color.b, hero.color.a];
     let hit_color_data = vec![1.0f32, 0.0, 0.0, 1.0];
 
-    let cbuf = device.new_buffer_with_data(
-        hero_color_data.as_ptr() as *const _, 
-        (size_of::<f32>() * hero_color_data.len()) as u64, 
-        MTLResourceOptions::CPUCacheModeDefaultCache | MTLResourceOptions::StorageModeManaged
-    );
+    let cbuf = make_buf(&hero_color_data, &device);
+    let rot_buf = make_buf(&vec![0.0f32], &device);
+    let hit_color_buf = make_buf(&hit_color_data, &device);
 
-    let rot_buf = {
-        let data = vec![0.0f32];
-        device.new_buffer_with_data(
-            data.as_ptr() as *const _, 
-            size_of::<f32>() as u64,
-            default_buffer_opts
-        )
-    };
-
-    let hit_color_buf = device.new_buffer_with_data(
-        hit_color_data.as_ptr() as *const _, 
-        (size_of::<f32>() * hit_color_data.len()) as u64, 
-        MTLResourceOptions::CPUCacheModeDefaultCache | MTLResourceOptions::StorageModeManaged
-    );
-
-    let pellet_buffer = {
-        let pellet_rect = vec![Rect{
-            w: 10.0 / view_width,
-            h: 10.0 / view_height,
-        }];
-        device.new_buffer_with_data(
-            pellet_rect.as_ptr() as *const _, 
-            size_of::<Rect>() as u64, 
-            MTLResourceOptions::CPUCacheModeDefaultCache | MTLResourceOptions::StorageModeManaged
-        )
-    };
+    let pellet_buffer = make_buf(&vec![Rect{w: 10.0 / view_width,h: 10.0 / view_height}], &device);
     let mut pellet_paths : Vec<StraightPath> = {
         (0..9).map(|_| StraightPath{
             speed: 1.0,
@@ -703,39 +826,20 @@ fn main() {
         }).collect()
     };
     let pellet_starts = vec![Float3(0.0, 0.0, 0.0) ; 10];
+    let pellet_pbuf = make_buf(&pellet_starts, &device);
 
-    let pellet_pbuf = device.new_buffer_with_data(
-        pellet_starts.as_ptr() as *const _, 
-        (size_of::<Float3>() * pellet_starts.len()) as u64, 
-        default_buffer_opts
-    );
 
-    let screen_size_buf = {
-        let data = vec![view_width, view_height];
-
-        device.new_buffer_with_data(data.as_ptr() as *const _, 
-            size_of::<Float2>() as u64, 
-            default_buffer_opts
-        )
-    };
+    let screen_size_buf = make_buf(&vec![view_width, view_height], &device);
 
     let boss_data = vec![
-        Float2(0.2f32, 1.0),
-        Float2(-0.2, 1.0),
+        Float2(0.1f32, 1.0),
+        Float2(-0.1, 1.0),
         Float2(0.0, 0.8)
     ];
-    let boss_vbuf = device.new_buffer_with_data(
-        boss_data.as_ptr() as *const _, 
-        (boss_data.len() * size_of::<f32>()) as u64, 
-        default_buffer_opts
-    );
+    let boss_vbuf = make_buf(&boss_data, &device);
 
     let boss_color_data = vec![0.7f32, 0.15, 0.55, 1.0];
-    let boss_cbuf = device.new_buffer_with_data(
-        boss_color_data.as_ptr() as *const _, 
-        (size_of::<f32>() * boss_color_data.len()) as u64, 
-        MTLResourceOptions::CPUCacheModeDefaultCache | MTLResourceOptions::StorageModeManaged
-    );
+    let boss_cbuf = make_buf(&boss_color_data, &device);
 
     let mut live_pellets : u64 = 0;
     // let arrow1_pos = [-150.0f32 / view_width, 100.0 / view_height, PI / 2.0];
@@ -749,11 +853,7 @@ fn main() {
     let arrow_positions : Vec<Float4> = vec![Float4(0.0, 1.0, PI, 2.5); num_arrows as usize];
 
 
-    let arrow_pbuf = device.new_buffer_with_data(
-        arrow_positions.as_ptr() as *const _,
-        (mem::size_of::<Float4>() * arrow_positions.len()) as u64,
-        default_buffer_opts
-    );
+    let arrow_pbuf = make_buf(&arrow_positions, &device);
 
     let dummy_vertex_data = build_arrow_vertices(30.0 / view_width, 150.0 / view_height);
     let arrow_vbuf = device.new_buffer_with_data(
@@ -774,6 +874,13 @@ fn main() {
         health : 125,
         phase : 0
     };
+
+    let tile_width = 0.2;
+    let tile_height = 0.2;
+    let mut tile_positions = Vec::<Float2>::with_capacity(512);
+    let tile_vbuf = make_rect(tile_width, tile_height, &device);
+    fill_positions(&mut tile_positions, Float2(-1.0, -1.0), tile_width, tile_height, 21, 21);
+    let tile_pbuf = make_buf(&tile_positions, &device);
 
     let fps = 60.0;
     let mut frame_time = get_next_frame(fps);
@@ -801,53 +908,20 @@ fn main() {
                     }
                     //hero updates
                     hero.update_position((current_x - center_x) / view_width, (current_y - center_y) / view_height);
-                    let p = pbuf.contents();
                     let position_data = Float2((current_x - center_x) / view_width, (current_y - center_y) / view_height);
                     let hero_offset = Float2(0.0, -0.25);
                     let screen_pos = [hero_offset.0, hero_offset.1];
 
                     let mouse_pos = Float2((mouse_location.x as f32 - center_x) / view_width * 2.0, (mouse_location.y as f32 - center_y) / view_height * 2.0);
                     let mouse_dir = float2_subtract(mouse_pos, hero_offset).normalized();
-                    let r = rot_buf.contents();
                     let mouse_theta = vec![mouse_dir.0.atan2(mouse_dir.1)];
 
-                    unsafe {
-                        std::ptr::copy(
-                            screen_pos.as_ptr(),
-                            p as *mut f32,
-                            screen_pos.len() as usize
-                        );
-                    }
-                    pbuf.did_modify_range(NSRange::new(
-                        0 as u64, 
-                        (screen_pos.len() * size_of::<Float2>()) as u64
-                    ));
+                    copy_to_buf(&screen_pos.to_vec(), &pbuf);
+                    copy_to_buf(&mouse_theta, &rot_buf);
 
-                    unsafe {
-                        std::ptr::copy(
-                            mouse_theta.as_ptr(),
-                            r as *mut f32,
-                            mouse_theta.len() as usize
-                        );
-                    }
-                    rot_buf.did_modify_range(NSRange::new(
-                        0 as u64, 
-                        (mouse_theta.len() * size_of::<f32>()) as u64
-                    ));
-
-                    let bb = boss_vbuf.contents();
                     let b_buf : Vec<Float2> = boss_data.iter().map(|pos| float2_subtract(*pos, position_data)).collect();
-                    unsafe {
-                        std::ptr::copy(
-                            b_buf.as_ptr(),
-                            bb as *mut Float2,
-                            b_buf.len() as usize
-                        );
-                    }
-                    boss_vbuf.did_modify_range(NSRange::new(
-                        0 as u64, 
-                        (b_buf.len() * size_of::<Float2>()) as u64
-                    ));
+                    copy_to_buf(&b_buf, &boss_vbuf);
+
                     //hero shot updates
                     for path in pellet_paths.iter_mut() {
                         if path.get_expiration() < t {
@@ -878,37 +952,20 @@ fn main() {
                     }
                     
                     let ppbuf : Vec<Float2> = pellet_paths.iter().map(|path| float2_subtract(path.get_relative_position(t), position_data)).collect();
-                    let pp = pellet_pbuf.contents();
-                    unsafe {
-                        std::ptr::copy(
-                            ppbuf.as_ptr(), 
-                            pp as *mut Float2, 
-                            ppbuf.len() as usize
-                        );
-                    }
-                    pellet_pbuf.did_modify_range(NSRange::new(
-                        0 as u64,
-                        live_pellets * size_of::<Float3>() as u64
-                    ));
+                    copy_to_buf(&ppbuf, &pellet_pbuf);
 
                     let apbuf : Vec<Float4> = arrow_paths.iter().map(|path| Float4::from_float3(path.get_relative_pos_rot(t), path.get_expiration() - t)).collect();
                     let arrow_positions_updated : Vec<Float3> = apbuf.iter().map(|data| Float3(data.0, data.1, data.2)).collect();
                     let apbuf : Vec<Float4> = apbuf.iter().map(|data| Float4(data.0 - position_data.0 + screen_pos[0], data.1 - position_data.1 + screen_pos[1], data.2, data.3)).collect();
-                    let ap = arrow_pbuf.contents();
-                    unsafe {
-                        std::ptr::copy(
-                            apbuf.as_ptr(),
-                            ap as *mut Float4,
-                            apbuf.len() as usize
-                        );
-                    }
-                    arrow_pbuf.did_modify_range(NSRange::new(
-                        0 as u64,
-                        (apbuf.len() * size_of::<Float4>()) as u64
-                    ));
+                    copy_to_buf(&apbuf, &arrow_pbuf);
 
 
+                    //background / floor update
+                    let tpbuf : Vec<Float2> = tile_positions.iter().map(|pos| float2_subtract(*pos, position_data)).collect();
+                    copy_to_buf(&tpbuf, &tile_pbuf);
 
+
+                    //prepare render pass + encoder
                     let render_pass_descriptor = RenderPassDescriptor::new();
                     let drawable = match launch_screen.next_drawable() {
                         Some(drawable) => drawable,
@@ -921,10 +978,10 @@ fn main() {
                     let command_buffer = command_queue.new_command_buffer();
                     let encoder = command_buffer.new_render_command_encoder(&render_pass_descriptor);
 
-                    //hero draws
+
+                    //Buffer State persists between draw calls, fragment buffer only has to be set once
+                    //hero draw
                     encoder.set_render_pipeline_state(&hero_pipeline_state);
-                    encoder.set_vertex_buffer(0, Some(&hero_rect_buffer), 0);
-                    encoder.set_vertex_buffer(1, Some(&pbuf), 0);
                     if let Some(i) = check_arrow_collisions(&mut arrows, &hero, &arrow_positions_updated) {
                         arrow_paths[i].set_dead();
                         hero.hit();
@@ -935,27 +992,46 @@ fn main() {
                     } else {
                         encoder.set_fragment_buffer(0, Some(&cbuf), 0);
                     }
-                    encoder.draw_primitives(MTLPrimitiveType::TriangleStrip, 0, 4);
+                    draw_shape(&hero_rect_buffer, &pbuf, encoder, MTLPrimitiveType::TriangleStrip, 4);
+
+
+                    //draw background
+                    encoder.set_render_pipeline_state(&tile_pipeline_state);
+                    encoder.set_fragment_buffer(0, Some(&rot_buf), 0);
+                    draw_shape_instanced(&tile_vbuf, &tile_pbuf, encoder, MTLPrimitiveType::TriangleStrip, 4, tile_positions.len() as u64);
+                    //draw_shape_instanced(&v_buf, &p_buf, encoder, MTLPrimitiveType::Triangle);
 
                     //hero shot draws
                     encoder.set_render_pipeline_state(&pellet_pipeline_state);
-                    encoder.set_vertex_buffer(0, Some(&pellet_buffer), 0);
-                    encoder.set_vertex_buffer(1, Some(&pellet_pbuf), 0);
-                    encoder.set_fragment_buffer(0, Some(&rot_buf), 0);
-                    encoder.draw_primitives_instanced(MTLPrimitiveType::TriangleStrip, 0, 4, live_pellets);
-
+                    draw_shape_instanced(
+                        &pellet_buffer, 
+                        &pellet_pbuf, 
+                        encoder, 
+                        MTLPrimitiveType::TriangleStrip,
+                        4, 
+                        live_pellets
+                    );
+                    
                     //arrow draws
                     encoder.set_render_pipeline_state(&arrow_pipeline_state);
-                    encoder.set_vertex_buffer(0, Some(&arrow_vbuf), 0);
-                    encoder.set_vertex_buffer(1, Some(&arrow_pbuf), 0);
-                    encoder.set_fragment_buffer(0, Some(&rot_buf), 0);
-                    encoder.draw_primitives(MTLPrimitiveType::Triangle, 0, 9 * num_arrows as u64);
+                    draw_shape(
+                        &arrow_vbuf, 
+                        &arrow_pbuf, 
+                        encoder, 
+                        MTLPrimitiveType::Triangle, 
+                        9 * num_arrows as u64
+                    );
 
+                    //boss draw
                     encoder.set_render_pipeline_state(&triangle_pipeline_state);
-                    encoder.set_vertex_buffer(0, Some(&boss_vbuf), 0);
-                    encoder.set_vertex_buffer(1, Some(&boss_cbuf), 0);
-                    encoder.set_fragment_buffer(0, Some(&rot_buf), 0);
-                    encoder.draw_primitives(MTLPrimitiveType::Triangle, 0, 3);
+                    draw_shape(
+                        &boss_vbuf, 
+                        &boss_cbuf, 
+                        encoder, 
+                        MTLPrimitiveType::Triangle, 
+                        3
+                    );
+
                     
                     encoder.end_encoding();
                     command_buffer.present_drawable(&drawable);
