@@ -146,6 +146,7 @@ pub trait LineCollider {
     fn get_collider(&self, _positions : &Vec<Float3>) -> Float4;
 }
 
+#[derive(Clone)]
 struct Arrow {
     index: usize,
     _width: f32,
@@ -180,6 +181,63 @@ impl Boss {
     fn die(&self) {
         println!("Win!");
     }
+}
+
+enum Enemy {
+    Ranged{health : i32, pos : Float2, speed : f32},
+    Melee{health : i32, pos : Float2, speed : f32},
+    Dead
+}
+
+impl Enemy {
+    fn get_health (&self) -> Option<i32>{
+        match self {
+            Enemy::Ranged {health, pos: _, speed: _ } => Some(*health),
+            Enemy::Melee {health, pos : _, speed: _ } => Some(*health),
+            Enemy::Dead => None,
+        }
+    }
+    fn do_pathfinding(&self, crumbs : Crumbs, colliders : Vec<Box<&dyn Collider>>, positions: &Vec<Float3>) -> Float2 {
+        match self {
+            Enemy::Ranged { health: _, pos: _, speed: _ } => Float2(0.0, 0.0),
+            Enemy::Melee { health: _, pos, speed } => {
+                simple_enemy_movement(*pos, *speed, crumbs, colliders, positions)
+            },
+            Enemy::Dead => todo!(),
+        }
+    }
+}
+struct Crumbs {
+    index : usize,
+    crumbs : [Float2; 5]
+}
+
+impl Crumbs {
+    fn new() -> Self {
+        Crumbs {index: 0, crumbs: [Float2(0.0, 0.0); 5]}
+    }
+    fn add(&mut self, crumb : Float2) {
+        self.crumbs[self.index] = crumb;
+        self.index = (self.index + 1) % 5;
+    }
+}
+
+fn simple_enemy_movement (pos : Float2, delta : f32, crumbs : Crumbs, colliders : Vec<Box<&dyn Collider>>, positions: &Vec<Float3>) -> Float2 {
+    //let mut closest : (Float2, f32) = (Float2(0.0, 0.0), 999.0);
+    let mut closest : (Float2, f32) = (Float2(0.0, 0.0), 999.0);
+    for crumb in crumbs.crumbs {
+        let dist = float2_subtract(pos, crumb);
+        if dist.magnitude() < closest.1 {
+            for collider in &colliders {
+                if line_rect_collision(Float4::new(pos, crumb), collider.get_collider(positions)){
+                    continue;
+                } 
+            }
+            closest.1 = dist.magnitude();
+            closest.0 = dist.normalized();
+        }
+    }
+    Float2(closest.0.0 * delta, closest.0.1 * delta)
 }
 
 #[inline]
@@ -788,6 +846,8 @@ fn main() {
     
     let start_position = [(current_x - center_x) / view_width, (current_y - center_y) / view_height];
 
+    let mut colliders : Vec<Box<dyn Collider>> = Vec::new();
+
     let mut hero = Hero {
         rect : Rect {
             w : 50.0 / view_width,
@@ -803,9 +863,14 @@ fn main() {
         position : Float2((current_x - center_x) / view_width, (current_y - center_y) / view_height)
     };
 
+    colliders.push(Box::new(hero));
+
     let hero_rect = vec![hero.rect];
     let hero_rect_buffer = make_buf(&hero_rect, &device);
     let pbuf = make_buf(&start_position.to_vec(), &device);
+
+    let mut crumbs : Crumbs = Crumbs::new();
+    let crumb_time : f32 = 0.4;
 
     //let hero_color = hero.color;
     let hero_color_data = vec![hero.color.r, hero.color.g, hero.color.b, hero.color.a];
@@ -827,27 +892,16 @@ fn main() {
     };
     let pellet_starts = vec![Float3(0.0, 0.0, 0.0) ; 10];
     let pellet_pbuf = make_buf(&pellet_starts, &device);
+    let mut live_pellets : u64 = 0;
 
 
     let screen_size_buf = make_buf(&vec![view_width, view_height], &device);
 
-    let boss_data = vec![
-        Float2(0.1f32, 1.0),
-        Float2(-0.1, 1.0),
-        Float2(0.0, 0.8)
-    ];
-    let boss_vbuf = make_buf(&boss_data, &device);
-
-    let boss_color_data = vec![0.7f32, 0.15, 0.55, 1.0];
-    let boss_cbuf = make_buf(&boss_color_data, &device);
-
-    let mut live_pellets : u64 = 0;
     // let arrow1_pos = [-150.0f32 / view_width, 100.0 / view_height, PI / 2.0];
     // let arrow2_pos = [-150.0f32 / view_width, 1.0 / view_height, PI / 2.0];
 
-    let num_arrows = 24;
-    let mut arrows = Vec::<Arrow>::new();
-    arrows.reserve(num_arrows as usize);
+    let num_arrows: u16 = 24;
+    let mut arrows = Vec::<Arrow>::with_capacity(num_arrows as usize);
 
     let (arrow_vertices, _) = gen_random_arrows(&mut arrows, num_arrows, view_width, view_height);
     let arrow_positions : Vec<Float4> = vec![Float4(0.0, 1.0, PI, 2.5); num_arrows as usize];
@@ -862,18 +916,32 @@ fn main() {
         MTLResourceOptions::CPUCacheModeDefaultCache | MTLResourceOptions::StorageModeManaged
     );
 
-    let mut arrow_paths = Vec::<Box<dyn Path>>::new();
-    arrow_paths.reserve(num_arrows as usize);
-
+    let mut arrow_paths = Vec::<Box<dyn Path>>::with_capacity(num_arrows as usize);
     gen_random_paths(&mut arrow_paths, num_arrows);
 
     
+    colliders.append(&mut arrows.clone().into_iter().map(|arrow| (Box::new(arrow)) as Box<dyn Collider>).collect());
+    
     //let mut hero_projectiles : Vec<Box<dyn Path>>;
+
+    let test : Enemy = Enemy::Melee { health: 15, pos: Float2(0.0, 0.0), speed: 0.1 };
+
 
     let mut boss = Boss {
         health : 125,
         phase : 0
     };
+
+    let boss_data = vec![
+        Float2(0.1f32, 1.0),
+        Float2(-0.1, 1.0),
+        Float2(0.0, 0.8)
+    ];
+    let boss_vbuf = make_buf(&boss_data, &device);
+
+    let boss_color_data = vec![0.7f32, 0.15, 0.55, 1.0];
+    let boss_cbuf = make_buf(&boss_color_data, &device);
+
 
     let tile_width = 0.2;
     let tile_height = 0.2;
@@ -893,7 +961,7 @@ fn main() {
     let mut hero_hit_t = 0.0;
 
     let mut t = 0.0;
-    let time_scale = 0.8;
+    let time_scale = 0.6;
     loop {
         autoreleasepool(|| {
                 if unsafe { frame_time.compare(&NSDate::now()) } == NSComparisonResult::Ascending {
@@ -909,6 +977,10 @@ fn main() {
                     //hero updates
                     hero.update_position((current_x - center_x) / view_width, (current_y - center_y) / view_height);
                     let position_data = Float2((current_x - center_x) / view_width, (current_y - center_y) / view_height);
+
+                    if t % crumb_time <= 0.03 {
+                        crumbs.add(position_data);
+                    }
                     let hero_offset = Float2(0.0, -0.25);
                     let screen_pos = [hero_offset.0, hero_offset.1];
 
@@ -980,6 +1052,12 @@ fn main() {
 
 
                     //Buffer State persists between draw calls, fragment buffer only has to be set once
+                    //background draw
+                    encoder.set_render_pipeline_state(&tile_pipeline_state);
+                    encoder.set_fragment_buffer(0, Some(&rot_buf), 0);
+                    draw_shape_instanced(&tile_vbuf, &tile_pbuf, encoder, MTLPrimitiveType::TriangleStrip, 4, tile_positions.len() as u64);
+                    //draw_shape_instanced(&v_buf, &p_buf, encoder, MTLPrimitiveType::Triangle);
+
                     //hero draw
                     encoder.set_render_pipeline_state(&hero_pipeline_state);
                     if let Some(i) = check_arrow_collisions(&mut arrows, &hero, &arrow_positions_updated) {
@@ -988,18 +1066,11 @@ fn main() {
                         hero_hit_t = t + 0.2;
                     }
                     if hero_hit_t > t {   
-                        encoder.set_fragment_buffer(0, Some(&hit_color_buf), 0);
+                        encoder.set_fragment_buffer(1, Some(&hit_color_buf), 0);
                     } else {
-                        encoder.set_fragment_buffer(0, Some(&cbuf), 0);
+                        encoder.set_fragment_buffer(1, Some(&cbuf), 0);
                     }
                     draw_shape(&hero_rect_buffer, &pbuf, encoder, MTLPrimitiveType::TriangleStrip, 4);
-
-
-                    //draw background
-                    encoder.set_render_pipeline_state(&tile_pipeline_state);
-                    encoder.set_fragment_buffer(0, Some(&rot_buf), 0);
-                    draw_shape_instanced(&tile_vbuf, &tile_pbuf, encoder, MTLPrimitiveType::TriangleStrip, 4, tile_positions.len() as u64);
-                    //draw_shape_instanced(&v_buf, &p_buf, encoder, MTLPrimitiveType::Triangle);
 
                     //hero shot draws
                     encoder.set_render_pipeline_state(&pellet_pipeline_state);

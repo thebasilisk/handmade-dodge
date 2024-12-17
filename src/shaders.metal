@@ -49,7 +49,7 @@ vertex PosInOut rectangle_vertex (
 
 fragment float4 rectangle_shader (
     PosInOut in [[stage_in]],
-    const device float4 *color [[ buffer(0) ]]
+    const device float4 *color [[ buffer(1) ]]
 ) {
     auto device const &col = color[0];
     return col;
@@ -118,16 +118,32 @@ fragment float4 fragment_shader(
     const device float *rot [[ buffer(0) ]]
 ) {
     auto device const &vision_cone_rotation = rot[0];
+    // auto device const &targetPos = mousePos[0];
 
     float2 hero_pos_lock = float2(1024.0 / 2.0, 768.0 / 1.625);
     float2 rel_pos = in.position.xy - hero_pos_lock;
-
+    float mouse_theta = vision_cone_rotation;
+    if (abs(mouse_theta) > M_PI_2_F) {
+        rel_pos.y *= -1;
+        mouse_theta = copysign(M_PI_F - abs(mouse_theta), mouse_theta);
+    }
     float theta = atan2(rel_pos.x, -rel_pos.y);
+    // float theta = -M_PI_F;
+
+    // float theta = abs(atan2(targetPos.y * rel_pos.x - targetPos.x * rel_pos.y, targetPos.x * rel_pos.x + targetPos.y * rel_pos.y));
+    // float theta = abs(atan2(-rel_pos.y * targetPos.x - rel_pos.x * targetPos.y, targetPos.x * rel_pos.x + targetPos.y * -rel_pos.y));
     float fov = M_PI_4_F;
-    // float vision_cone_rotation = M_PI_2_F;
+    // float fov = M_PI_2_F;
+
+
+    // float vision_cone_rotation = M_PI_F;
+    // float domain_adjusted_theta = fmod(theta - vision_cone_rotation), (2 * M_PI_F);
+    float diff = abs(mouse_theta - theta);
+    
+    // float diff = abs(M_PI_F - domain_adjusted_theta);
 
     //float opacity = mix(1.0, 0.2, abs(vision_cone_rotation - theta) / fov);
-    float opacity = (fov - abs(vision_cone_rotation - theta));
+    float opacity = (fov - diff);
 
     return float4(in.color.rgb , in.color.a * opacity * 2.0);
 }
