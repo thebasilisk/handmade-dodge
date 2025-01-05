@@ -2,7 +2,7 @@ use std::{f32::consts::PI, ffi::{c_float, CString}, mem, os::raw::c_char, ptr::N
 use rand::random;
 use objc::rc::autoreleasepool;
 use objc2::rc::Retained;
-use objc2_app_kit::{NSAnyEventMask, NSApplication, NSApplicationActivationPolicy, NSBackingStoreType, NSColor, NSEventType, NSScreen, NSWindow, NSWindowStyleMask};
+use objc2_app_kit::{NSAnyEventMask, NSApplication, NSApplicationActivationPolicy, NSBackingStoreType, NSColor, NSEventSubtype, NSEventType, NSScreen, NSWindow, NSWindowStyleMask};
 use objc2_foundation::{CGPoint, MainThreadMarker, NSComparisonResult, NSDate, NSDefaultRunLoopMode, NSRect, NSSize, NSString};
 
 use metal::*;
@@ -160,7 +160,7 @@ impl Collider for Arrow {
         //let cos_theta = f32::cos(positions[self.index][2]); //* self.width - f32::sin(positions[self.index][2] * self.height);
         //let sin_theta = f32::sin(positions[self.index][2]); //* self.width - f32::cos(positions[self.index][2] * self.height);
         Float4::new(
-            float2_add(apply_rotation_float2(Float2(0.0, self.height / 2.0), -theta), pos), 
+            float2_add(apply_rotation_float2(Float2(0.0, self.height / 2.0), -theta), pos),
             float2_add(apply_rotation_float2(Float2(0.0, -self.height / 2.0), -theta), pos)
         )
     }
@@ -231,7 +231,7 @@ fn simple_enemy_movement (pos : Float2, delta : f32, crumbs : Crumbs, colliders 
             for collider in &colliders {
                 if line_rect_collision(Float4::new(pos, crumb), collider.get_collider(positions)){
                     continue;
-                } 
+                }
             }
             closest.1 = dist.magnitude();
             closest.0 = dist.normalized();
@@ -260,7 +260,7 @@ fn build_arrow_vertices (width : f32, length : f32) -> [f32; 18]{
 fn gen_random_arrows(arrows : &mut Vec<Arrow>, n : u16, view_width : f32, view_height : f32) -> (Vec<[f32; 18]>, Vec<[f32; 3]>) {
     let width = 30.0 / view_width;
     let height = 100.0 / view_height;
-    
+
     let mut vertices : Vec<[f32; 18]> = Vec::new();
     let mut positions : Vec<[f32; 3]> = Vec::new();
     for i in 0..n {
@@ -322,7 +322,7 @@ fn gen_random_paths (paths : &mut Vec<Box<dyn Path>>, n : u16) {
 fn regen_dead_arrows (paths : &mut Vec<Box<dyn Path>>, t : f32) {
     for path in paths.iter_mut() {
         if path.get_expiration() < t {
-            *path = gen_random_path(t); 
+            *path = gen_random_path(t);
         }
     }
 }
@@ -332,7 +332,7 @@ fn line_line_collision(l1 : Float4, l2 : Float4) -> bool {
     let b = Float2 (l1.2, l1.3);
     let c = Float2(l2.0, l2.1);
     let d = Float2 (l2.2, l2.3);
-    
+
     let denominator : f32 = ((b.0 - a.0) * (d.1 - c.1)) - ((b.1 - a.1) * (d.0 - c.0));
     let numerator1 : f32 = ((a.1 - c.1) * (d.0 - c.0)) - ((a.0 - c.0) * (d.1 - c.1));
     let numerator2 : f32 = ((a.1 - c.1) * (b.0 - a.0)) - ((a.0 - c.0) * (b.1 - a.1));
@@ -341,7 +341,7 @@ fn line_line_collision(l1 : Float4, l2 : Float4) -> bool {
     if denominator == 0.0 {
     return numerator1 == 0.0 && numerator2 == 0.0;
     };
-    
+
     let r : f32 = numerator1 / denominator;
     let s : f32 = numerator2 / denominator;
 
@@ -509,13 +509,13 @@ impl Path for WavyPath {
 fn initialize_app(thread : MainThreadMarker) -> Retained<NSApplication> {
     let app = NSApplication::sharedApplication(thread);
     app.setActivationPolicy(NSApplicationActivationPolicy::Regular);
-    
+
     return app;
 }
 
 #[inline]
 fn initialize_window(thread: MainThreadMarker) -> Retained<NSWindow> {
-    //Set 
+    //Set
     const GLOBAL_RENDERING_WIDTH : f64 = 1024.0;
     const GLOBAL_RENDERING_HEIGHT : f64 = 768.0;
 
@@ -541,25 +541,25 @@ fn initialize_window(thread: MainThreadMarker) -> Retained<NSWindow> {
 
     let window_title = unsafe {
         NSString::initWithCString_encoding(
-            thread.alloc::<NSString>(), 
-            ctitleptr, 
+            thread.alloc::<NSString>(),
+            ctitleptr,
             NSString::defaultCStringEncoding()
         ).expect("String init failed!")
     };
 
-    let style_mask = 
+    let style_mask =
         NSWindowStyleMask::Titled.union(
         NSWindowStyleMask::Closable.union(
         NSWindowStyleMask::Resizable.union(
         NSWindowStyleMask::Miniaturizable
     )));
 
-    let window  = unsafe { 
+    let window  = unsafe {
         NSWindow::initWithContentRect_styleMask_backing_defer(
-        thread.alloc::<NSWindow>(), 
-        window_rect, 
-        style_mask, 
-        NSBackingStoreType::NSBackingStoreBuffered, 
+        thread.alloc::<NSWindow>(),
+        window_rect,
+        style_mask,
+        NSBackingStoreType::NSBackingStoreBuffered,
         false)
     };
 
@@ -595,8 +595,8 @@ fn new_metal_layer(device: &DeviceRef) -> MetalLayer {
 }
 
 fn prepare_pipeline_state (
-    device : &DeviceRef, 
-    vertex_shader : &str, 
+    device : &DeviceRef,
+    vertex_shader : &str,
     fragment_shader : &str
 ) -> RenderPipelineState {
     let library_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/shaders.metallib");
@@ -615,7 +615,7 @@ fn prepare_pipeline_state (
         .unwrap();
 
     pipeline_attachment.set_pixel_format(MTLPixelFormat::RGBA8Unorm);
-    
+
     pipeline_attachment.set_blending_enabled(true);
     pipeline_attachment.set_rgb_blend_operation(metal::MTLBlendOperation::Add);
     pipeline_attachment.set_alpha_blend_operation(metal::MTLBlendOperation::Add);
@@ -641,7 +641,7 @@ fn prepare_render_pass_descriptor( render_pass_descriptor : &RenderPassDescripto
 
 fn make_buf<T>(data : &Vec<T>, device : &DeviceRef) -> Buffer {
     device.new_buffer_with_data(
-        data.as_ptr() as *const _, 
+        data.as_ptr() as *const _,
         (mem::size_of::<T>() * data.len())as u64,
         MTLResourceOptions::CPUCacheModeDefaultCache | MTLResourceOptions::StorageModeManaged
     )
@@ -649,7 +649,7 @@ fn make_buf<T>(data : &Vec<T>, device : &DeviceRef) -> Buffer {
 
 fn make_buf_with_cap<T>(data : &Vec<T>, device : &DeviceRef, capacity : usize) -> Buffer {
     device.new_buffer_with_data(
-        data.as_ptr() as *const _, 
+        data.as_ptr() as *const _,
         (mem::size_of::<T>() * capacity)as u64,
         MTLResourceOptions::CPUCacheModeDefaultCache | MTLResourceOptions::StorageModeManaged
     )
@@ -665,7 +665,7 @@ fn copy_to_buf<T>(data : &Vec<T>, dst : &Buffer) {
         );
     }
     dst.did_modify_range(NSRange::new(
-        0 as u64, 
+        0 as u64,
         (data.len() * size_of::<T>()) as u64
     ));
 }
@@ -702,8 +702,8 @@ pub trait Drawable {
 // }
 // impl Tile {
 //     fn new(rect : Rect, device : &DeviceRef) -> Self {
-//         Self { 
-//             rect, 
+//         Self {
+//             rect,
 //             vbuf: make_buf(&vec![rect], device)
 //         }
 //     }
@@ -805,28 +805,28 @@ fn main() {
     let view_height = window.contentView().unwrap().frame().size.height as f32;
 
     let hero_pipeline_state = prepare_pipeline_state(
-        &device, 
-        "rectangle_vertex", 
+        &device,
+        "rectangle_vertex",
         "rectangle_shader"
     );
     let pellet_pipeline_state = prepare_pipeline_state(
-        &device, 
+        &device,
         "rect_vertex_instanced",
         "fragment_shader"
     );
     let arrow_pipeline_state = prepare_pipeline_state(
-        &device, 
-        "arrow_vertex", 
+        &device,
+        "arrow_vertex",
         "fragment_shader"
     );
     let triangle_pipeline_state = prepare_pipeline_state(
-        &device, 
-        "triangle_vertex", 
+        &device,
+        "triangle_vertex",
         "fragment_shader"
     );
     let tile_pipeline_state = prepare_pipeline_state(
-        &device, 
-        "tile_vertex", 
+        &device,
+        "tile_vertex",
         "fragment_shader"
     );
 
@@ -843,7 +843,7 @@ fn main() {
     let center_y = view_height / 2.0;
     let mut current_x = center_x;
     let mut current_y = center_y;
-    
+
     let start_position = [(current_x - center_x) / view_width, (current_y - center_y) / view_height];
 
     let mut colliders : Vec<Box<dyn Collider>> = Vec::new();
@@ -854,10 +854,10 @@ fn main() {
             h : 50.0 / view_height,
         },
         color : Color {
-            r: 0.5, 
-            b: 0.2, 
-            g: 0.8, 
-            a: 1.0 
+            r: 0.5,
+            b: 0.2,
+            g: 0.8,
+            a: 1.0
         },
         health : 10,
         position : Float2((current_x - center_x) / view_width, (current_y - center_y) / view_height)
@@ -911,17 +911,17 @@ fn main() {
 
     let dummy_vertex_data = build_arrow_vertices(30.0 / view_width, 150.0 / view_height);
     let arrow_vbuf = device.new_buffer_with_data(
-        arrow_vertices.as_ptr() as *const _, 
-        (arrow_vertices.len() * dummy_vertex_data.len() * size_of::<f32>()) as u64, 
+        arrow_vertices.as_ptr() as *const _,
+        (arrow_vertices.len() * dummy_vertex_data.len() * size_of::<f32>()) as u64,
         MTLResourceOptions::CPUCacheModeDefaultCache | MTLResourceOptions::StorageModeManaged
     );
 
     let mut arrow_paths = Vec::<Box<dyn Path>>::with_capacity(num_arrows as usize);
     gen_random_paths(&mut arrow_paths, num_arrows);
 
-    
+
     colliders.append(&mut arrows.clone().into_iter().map(|arrow| (Box::new(arrow)) as Box<dyn Collider>).collect());
-    
+
     //let mut hero_projectiles : Vec<Box<dyn Path>>;
 
     let test : Enemy = Enemy::Melee { health: 15, pos: Float2(0.0, 0.0), speed: 0.1 };
@@ -1022,7 +1022,7 @@ fn main() {
                             shot_cd = t + 0.25;
                         }
                     }
-                    
+
                     let ppbuf : Vec<Float2> = pellet_paths.iter().map(|path| float2_subtract(path.get_relative_position(t), position_data)).collect();
                     copy_to_buf(&ppbuf, &pellet_pbuf);
 
@@ -1065,7 +1065,7 @@ fn main() {
                         hero.hit();
                         hero_hit_t = t + 0.2;
                     }
-                    if hero_hit_t > t {   
+                    if hero_hit_t > t {
                         encoder.set_fragment_buffer(1, Some(&hit_color_buf), 0);
                     } else {
                         encoder.set_fragment_buffer(1, Some(&cbuf), 0);
@@ -1075,35 +1075,35 @@ fn main() {
                     //hero shot draws
                     encoder.set_render_pipeline_state(&pellet_pipeline_state);
                     draw_shape_instanced(
-                        &pellet_buffer, 
-                        &pellet_pbuf, 
-                        encoder, 
+                        &pellet_buffer,
+                        &pellet_pbuf,
+                        encoder,
                         MTLPrimitiveType::TriangleStrip,
-                        4, 
+                        4,
                         live_pellets
                     );
-                    
+
                     //arrow draws
                     encoder.set_render_pipeline_state(&arrow_pipeline_state);
                     draw_shape(
-                        &arrow_vbuf, 
-                        &arrow_pbuf, 
-                        encoder, 
-                        MTLPrimitiveType::Triangle, 
+                        &arrow_vbuf,
+                        &arrow_pbuf,
+                        encoder,
+                        MTLPrimitiveType::Triangle,
                         9 * num_arrows as u64
                     );
 
                     //boss draw
                     encoder.set_render_pipeline_state(&triangle_pipeline_state);
                     draw_shape(
-                        &boss_vbuf, 
-                        &boss_cbuf, 
-                        encoder, 
-                        MTLPrimitiveType::Triangle, 
+                        &boss_vbuf,
+                        &boss_cbuf,
+                        encoder,
+                        MTLPrimitiveType::Triangle,
                         3
                     );
 
-                    
+
                     encoder.end_encoding();
                     command_buffer.present_drawable(&drawable);
                     command_buffer.commit();
@@ -1113,13 +1113,13 @@ fn main() {
                     regen_dead_arrows(&mut arrow_paths, t);
             }
 
-            
+
             loop {
                 let event = unsafe {
                     app.nextEventMatchingMask_untilDate_inMode_dequeue(
-                        NSAnyEventMask, 
-                        Some(&frame_time), 
-                        NSDefaultRunLoopMode, 
+                        NSAnyEventMask,
+                        Some(&frame_time),
+                        NSDefaultRunLoopMode,
                         true
                     )
                 };
@@ -1129,13 +1129,11 @@ fn main() {
                             match e.r#type() {
                                 NSEventType::KeyDown => {
                                     key_pressed = e.keyCode();
-                                    app.sendEvent(&e);
                                 },
                                 NSEventType::KeyUp => {
                                     if key_pressed == e.keyCode() {
                                         key_pressed = 112;
                                     }
-                                    app.sendEvent(&e);
                                 },
                                 NSEventType::LeftMouseDown => {
                                     mouse_down = true;
@@ -1151,8 +1149,11 @@ fn main() {
                                 NSEventType::MouseMoved => {
                                     mouse_location = e.locationInWindow();
                                 }
-                                _ => app.sendEvent(&e),
+                                _ => {
+
+                                },
                             }
+                            app.sendEvent(&e);
                         }
                     },
                     None => break
